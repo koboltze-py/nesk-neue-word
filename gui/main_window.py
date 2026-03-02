@@ -27,22 +27,23 @@ from gui.fahrzeuge        import FahrzeugeWidget
 from gui.einstellungen    import EinstellungenWidget
 from gui.code19           import Code19Widget
 from gui.dokument_browser       import DokumentBrowserWidget
-from gui.mitarbeiter_dokumente  import MitarbeiterDokuementeWidget
+from gui.mitarbeiter_dokumente  import MitarbeiterDokumenteWidget
 from gui.hilfe_dialog           import HilfeDialog
 
 
 NAV_ITEMS = [
-    ("🏠", "Dashboard",       0),
-    ("☀️", "Aufgaben Tag",    1),
-    ("🌙", "Aufgaben Nacht",  2),
-    ("📅", "Dienstplan",      3),
-    ("📋", "Übergabe",        4),
-    ("🚗", "Fahrzeuge",       5),
-    ("🕐", "Code 19",         6),
-    ("🖨️", "Ma. Ausdrucke",  7),
-    ("🤒", "Krankmeldungen",  8),
-    ("💾", "Backup",          9),
-    ("⚙️",  "Einstellungen", 10),
+    ("🏠", "Dashboard",        0),
+    ("👥", "Mitarbeiter",       1),
+    ("☀️", "Aufgaben Tag",     2),
+    ("🌙", "Aufgaben Nacht",   3),
+    ("📅", "Dienstplan",       4),
+    ("📋", "Übergabe",         5),
+    ("🚗", "Fahrzeuge",        6),
+    ("🕐", "Code 19",          7),
+    ("🖨️", "Ma. Ausdrucke",   8),
+    ("🤒", "Krankmeldungen",   9),
+    ("💾", "Backup",          10),
+    ("⚙️",  "Einstellungen",  11),
 ]
 
 NAV_TOOLTIPS = [
@@ -215,7 +216,7 @@ class MainWindow(QMainWindow):
 
         # Pages
         self._dashboard_page         = DashboardWidget()
-        self._mitarbeiter_dok_page   = MitarbeiterDokuementeWidget()
+        self._mitarbeiter_dok_page   = MitarbeiterDokumenteWidget()
         self._aufgaben_tag_page      = AufgabenTagWidget()
         self._aufgaben_page          = AufgabenWidget()
         self._dienstplan_page        = DienstplanWidget()

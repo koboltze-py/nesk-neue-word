@@ -5,6 +5,7 @@ mit einheitlicher DRK-Kopf-/Fußzeile
 """
 import os
 import sys
+import webbrowser
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import (
@@ -13,21 +14,29 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox,
     QFormLayout, QLineEdit, QTextEdit, QComboBox, QDateEdit,
     QMessageBox, QFrame, QScrollArea, QSizePolicy, QInputDialog,
-    QFileDialog
+    QFileDialog, QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
+    QTimeEdit, QTabWidget
 )
-from PySide6.QtCore import Qt, QDate, QSize
+from PySide6.QtCore import Qt, QDate, QSize, QTime
 from PySide6.QtGui import QFont, QColor, QIcon
 
 from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_BORDER
 
 from functions.mitarbeiter_dokumente_functions import (
-    KATEGORIEN, DOKUMENTE_BASIS, VORLAGE_PFAD,
+    KATEGORIEN, DOKUMENTE_BASIS, VORLAGE_PFAD, STELLUNGNAHMEN_EXTERN_PFAD,
     lade_dokumente_nach_kategorie,
     erstelle_dokument_aus_vorlage,
+    erstelle_stellungnahme,
     oeffne_datei,
     loesche_dokument,
     umbenennen_dokument,
     sicherungsordner,
+)
+from functions.stellungnahmen_db import (
+    lade_alle as db_lade_alle,
+    eintrag_loeschen as db_eintrag_loeschen,
+    verfuegbare_jahre as db_jahre,
+    get_eintrag as db_get_eintrag,
 )
 
 
@@ -58,6 +67,330 @@ def _btn_light(text: str) -> QPushButton:
         QPushButton:disabled { background:#f5f5f5; color:#bbb; }
     """)
     return btn
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Dialog: Stellungnahme erstellen
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _StellungnahmeDialog(QDialog):
+    """Strukturierter Stellungnahme-Assistent mit kontextabhängigen Feldern."""
+
+    _FIELD_STYLE = (
+        "QLineEdit, QTextEdit, QTimeEdit, QComboBox {"
+        "border:1px solid #ccc; border-radius:4px; padding:4px;"
+        "font-size:12px; background:white;}"
+    )
+    _GROUP_STYLE = (
+        "QGroupBox { font-weight:bold; font-size:12px; color:#1565a8;"
+        "border:1px solid #c5d8f0; border-radius:6px;"
+        "margin-top:6px; padding-top:10px; background:#f8fbff;}"
+        "QGroupBox::title { subcontrol-origin:margin; left:12px;"
+        "padding:0 4px; background:#f8fbff;}"
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📝 Stellungnahme erstellen")
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(680)
+        self.resize(620, 750)
+        self._build_ui()
+        self._update_visibility()
+
+    # ── UI ──────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 12, 12, 8)
+        main_layout.setSpacing(6)
+
+        # Scrollbereich
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea{border:none;}")
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(10)
+        layout.setContentsMargins(4, 4, 4, 4)
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll, 1)
+
+        # ── 1. Allgemeine Angaben ──────────────────────────────────────────────
+        grp_allg = QGroupBox("📌 Allgemeine Angaben")
+        grp_allg.setStyleSheet(self._GROUP_STYLE)
+        fl = QFormLayout(grp_allg)
+        fl.setSpacing(8)
+
+        self._mitarbeiter = QLineEdit()
+        self._mitarbeiter.setPlaceholderText("Vor- und Nachname")
+        self._mitarbeiter.setStyleSheet(self._FIELD_STYLE)
+        fl.addRow("Mitarbeiter:", self._mitarbeiter)
+
+        self._datum_vorfall = QDateEdit()
+        self._datum_vorfall.setCalendarPopup(True)
+        self._datum_vorfall.setDisplayFormat("dd.MM.yyyy")
+        self._datum_vorfall.setDate(QDate.currentDate())
+        self._datum_vorfall.setStyleSheet(self._FIELD_STYLE)
+        fl.addRow("Datum des Vorfalls:", self._datum_vorfall)
+
+        self._datum_verfasst = QDateEdit()
+        self._datum_verfasst.setCalendarPopup(True)
+        self._datum_verfasst.setDisplayFormat("dd.MM.yyyy")
+        self._datum_verfasst.setDate(QDate.currentDate())
+        self._datum_verfasst.setStyleSheet(self._FIELD_STYLE)
+        fl.addRow("Verfasst am:", self._datum_verfasst)
+
+        layout.addWidget(grp_allg)
+
+        # ── 2. Art der Stellungnahme ───────────────────────────────────────────
+        grp_art = QGroupBox("ℹ️ Art der Stellungnahme")
+        grp_art.setStyleSheet(self._GROUP_STYLE)
+        art_layout = QVBoxLayout(grp_art)
+        art_layout.setSpacing(6)
+
+        self._art_group = QButtonGroup(self)
+        self._radio_flug   = QRadioButton("✈️  Flug-bezogener Vorfall")
+        self._radio_beschwerde  = QRadioButton("🗣️  Passagierbeschwerde")
+        self._radio_nm     = QRadioButton("🚶  Passagier nicht mitgeflogen (kein PRM-Dienstverspätung)")
+        self._radio_flug.setChecked(True)
+        for rb in (self._radio_flug, self._radio_beschwerde, self._radio_nm):
+            self._art_group.addButton(rb)
+            art_layout.addWidget(rb)
+
+        self._radio_flug.toggled.connect(self._update_visibility)
+        self._radio_beschwerde.toggled.connect(self._update_visibility)
+        self._radio_nm.toggled.connect(self._update_visibility)
+        layout.addWidget(grp_art)
+
+        # ── 3. Flugdaten ───────────────────────────────────────────────────────
+        self._grp_flug = QGroupBox("✈️ Flugdaten")
+        self._grp_flug.setStyleSheet(self._GROUP_STYLE)
+        flug_layout = QFormLayout(self._grp_flug)
+        flug_layout.setSpacing(8)
+
+        self._flugnummer = QLineEdit()
+        self._flugnummer.setPlaceholderText("z.B. LH1234 / EW987")
+        self._flugnummer.setStyleSheet(self._FIELD_STYLE)
+        flug_layout.addRow("Flugnummer:", self._flugnummer)
+
+        # Verspätung
+        self._verspaetung_cb = QCheckBox("Flug hat Verspätung")
+        self._verspaetung_cb.toggled.connect(self._update_visibility)
+        flug_layout.addRow("Verspätung:", self._verspaetung_cb)
+
+        self._grp_verspaetung = QGroupBox("🕒 Verspätungszeiten")
+        self._grp_verspaetung.setStyleSheet(
+            "QGroupBox{font-weight:bold;font-size:11px;color:#555;"
+            "border:1px dashed #ccc;border-radius:4px;margin-top:4px;padding-top:8px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 3px;}"
+        )
+        vsp_fl = QFormLayout(self._grp_verspaetung)
+        vsp_fl.setSpacing(6)
+        self._onblock = QTimeEdit()
+        self._onblock.setDisplayFormat("HH:mm")
+        self._onblock.setStyleSheet(self._FIELD_STYLE)
+        self._offblock = QTimeEdit()
+        self._offblock.setDisplayFormat("HH:mm")
+        self._offblock.setStyleSheet(self._FIELD_STYLE)
+        vsp_fl.addRow("Onblock-Zeit (tatsächlich):", self._onblock)
+        vsp_fl.addRow("Offblock-Zeit (geplant):", self._offblock)
+        # _grp_verspaetung wird als separates Top-Level-Element eingefügt
+
+        # Richtung
+        richtung_lbl = QLabel("Flugrichtung:")
+        richtung_lbl.setStyleSheet("font-size:12px;")
+        richtung_widget = QWidget()
+        rw = QHBoxLayout(richtung_widget)
+        rw.setContentsMargins(0, 0, 0, 0)
+        rw.setSpacing(16)
+        self._richt_group = QButtonGroup(self)
+        self._radio_inbound  = QRadioButton("Inbound 🛬")
+        self._radio_outbound = QRadioButton("Outbound 🛫")
+        self._radio_beides   = QRadioButton("Beides")
+        self._radio_inbound.setChecked(True)
+        for rb in (self._radio_inbound, self._radio_outbound, self._radio_beides):
+            self._richt_group.addButton(rb)
+            rw.addWidget(rb)
+        rw.addStretch()
+        self._radio_inbound.toggled.connect(self._update_visibility)
+        self._radio_outbound.toggled.connect(self._update_visibility)
+        self._radio_beides.toggled.connect(self._update_visibility)
+        flug_layout.addRow(richtung_lbl, richtung_widget)
+
+        layout.addWidget(self._grp_flug)
+        layout.addWidget(self._grp_verspaetung)
+
+        # ── 4. Inbound-Felder ─────────────────────────────────────────────────
+        self._grp_inbound = QGroupBox("🛬 Inbound-Einsatz")
+        self._grp_inbound.setStyleSheet(self._GROUP_STYLE)
+        ib_fl = QFormLayout(self._grp_inbound)
+        ib_fl.setSpacing(8)
+        self._ankunft_lfz = QTimeEdit()
+        self._ankunft_lfz.setDisplayFormat("HH:mm")
+        self._ankunft_lfz.setStyleSheet(self._FIELD_STYLE)
+        self._auftragsende = QTimeEdit()
+        self._auftragsende.setDisplayFormat("HH:mm")
+        self._auftragsende.setStyleSheet(self._FIELD_STYLE)
+        ib_fl.addRow("Ankunft Luftfahrzeug:", self._ankunft_lfz)
+        ib_fl.addRow("Auftragsende:", self._auftragsende)
+        layout.addWidget(self._grp_inbound)
+
+        # ── 5. Outbound-Felder ────────────────────────────────────────────────
+        self._grp_outbound = QGroupBox("🛫 Outbound-Einsatz")
+        self._grp_outbound.setStyleSheet(self._GROUP_STYLE)
+        ob_fl = QFormLayout(self._grp_outbound)
+        ob_fl.setSpacing(8)
+        self._paxannahme_zeit = QTimeEdit()
+        self._paxannahme_zeit.setDisplayFormat("HH:mm")
+        self._paxannahme_zeit.setStyleSheet(self._FIELD_STYLE)
+        ob_fl.addRow("Paxannahme-Zeit:", self._paxannahme_zeit)
+
+        self._paxannahme_ort = QComboBox()
+        self._paxannahme_ort.addItems(["C72", "Meetingpoint", "Sonstiges"])
+        self._paxannahme_ort.setStyleSheet(self._FIELD_STYLE)
+        self._paxannahme_ort.currentTextChanged.connect(self._update_visibility)
+        ob_fl.addRow("Ort der Paxannahme:", self._paxannahme_ort)
+
+        self._paxannahme_sonstiges = QLineEdit()
+        self._paxannahme_sonstiges.setPlaceholderText("Bitte Ort angeben ...")
+        self._paxannahme_sonstiges.setStyleSheet(self._FIELD_STYLE)
+        ob_fl.addRow("Ort (Sonstiges):", self._paxannahme_sonstiges)
+        layout.addWidget(self._grp_outbound)
+
+        # ── 6. Sachverhalt (für Flug + Beschwerde + nicht_mitgeflogen) ────────
+        self._grp_sachverhalt = QGroupBox("📝 Sachverhalt")
+        self._grp_sachverhalt.setStyleSheet(self._GROUP_STYLE)
+        sv_layout = QVBoxLayout(self._grp_sachverhalt)
+        self._sachverhalt = QTextEdit()
+        self._sachverhalt.setPlaceholderText(
+            "Bitte den Sachverhalt vollständig und sachlich schildern ..."
+        )
+        self._sachverhalt.setMinimumHeight(120)
+        self._sachverhalt.setStyleSheet(self._FIELD_STYLE)
+        sv_layout.addWidget(self._sachverhalt)
+        layout.addWidget(self._grp_sachverhalt)
+
+        # ── 7. Beschwerde-Text ────────────────────────────────────────────────
+        self._grp_beschwerde = QGroupBox("🗣️ Beschreibung der Beschwerde")
+        self._grp_beschwerde.setStyleSheet(self._GROUP_STYLE)
+        bw_layout = QVBoxLayout(self._grp_beschwerde)
+        self._beschwerde_text = QTextEdit()
+        self._beschwerde_text.setPlaceholderText("Inhalt der Beschwerde schildern ...")
+        self._beschwerde_text.setMinimumHeight(100)
+        self._beschwerde_text.setStyleSheet(self._FIELD_STYLE)
+        bw_layout.addWidget(self._beschwerde_text)
+        layout.addWidget(self._grp_beschwerde)
+
+        # ── 8. Nicht-mitgeflogen: Flugnummer ─────────────────────────────────
+        self._grp_nm = QGroupBox("🚶 Passagier nicht mitgeflogen")
+        self._grp_nm.setStyleSheet(self._GROUP_STYLE)
+        nm_fl = QFormLayout(self._grp_nm)
+        nm_fl.setSpacing(8)
+        self._flugnummer_nm = QLineEdit()
+        self._flugnummer_nm.setPlaceholderText("z.B. LH1234")
+        self._flugnummer_nm.setStyleSheet(self._FIELD_STYLE)
+        nm_fl.addRow("Flugnummer:", self._flugnummer_nm)
+        layout.addWidget(self._grp_nm)
+
+        layout.addStretch()
+
+        # ── Speicherort-Hinweis ───────────────────────────────────────────────
+        info = QLabel(
+            f"💾 Wird gespeichert in:\n"
+            f"  • Intern: Daten/Mitarbeiterdokumente/Stellungnahmen/\n"
+            f"  • Extern: 97_Stellungnahmen/"
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet(
+            "background:#e8f5e9; color:#256029; border-radius:4px;"
+            "padding:8px 12px; font-size:11px;"
+        )
+        main_layout.addWidget(info)
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("📝  Stellungnahme erstellen")
+        btns.accepted.connect(self._on_accept)
+        btns.rejected.connect(self.reject)
+        main_layout.addWidget(btns)
+
+    # ── Sichtbarkeit aktualisieren ────────────────────────────────────────────
+
+    def _update_visibility(self):
+        is_flug  = self._radio_flug.isChecked()
+        is_beschwerde = self._radio_beschwerde.isChecked()
+        is_nm    = self._radio_nm.isChecked()
+        is_verspaetung = self._verspaetung_cb.isChecked()
+        be_inbound  = self._radio_inbound.isChecked()  or self._radio_beides.isChecked()
+        be_outbound = self._radio_outbound.isChecked() or self._radio_beides.isChecked()
+        is_sonstiges = self._paxannahme_ort.currentText() == "Sonstiges"
+
+        self._grp_flug.setVisible(is_flug)
+        self._grp_verspaetung.setVisible((is_flug and is_verspaetung) or is_beschwerde)
+        self._grp_inbound.setVisible(is_flug and be_inbound)
+        self._grp_outbound.setVisible(is_flug and be_outbound)
+        self._grp_sachverhalt.setVisible(True)  # immer sichtbar
+        self._grp_beschwerde.setVisible(is_beschwerde)
+        self._grp_nm.setVisible(is_nm)
+        # Sonstiges-Eingabefeld
+        for i in range(self._grp_outbound.layout().rowCount()):
+            item = self._grp_outbound.layout().itemAt(i, QFormLayout.ItemRole.FieldRole)
+            if item and item.widget() == self._paxannahme_sonstiges:
+                item.widget().setVisible(is_sonstiges)
+            lbl_item = self._grp_outbound.layout().itemAt(i, QFormLayout.ItemRole.LabelRole)
+            if lbl_item and lbl_item.widget() and \
+                    "Sonstiges" in lbl_item.widget().text():
+                lbl_item.widget().setVisible(is_sonstiges)
+
+    # ── Validierung + Accept ──────────────────────────────────────────────────
+
+    def _on_accept(self):
+        if not self._mitarbeiter.text().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte den Mitarbeiternamen eingeben.")
+            return
+        if self._radio_flug.isChecked() and not self._flugnummer.text().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte die Flugnummer eingeben.")
+            return
+        if self._radio_nm.isChecked() and not self._flugnummer_nm.text().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte die Flugnummer eingeben.")
+            return
+        if not self._sachverhalt.toPlainText().strip():
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte den Sachverhalt schildern.")
+            return
+        self.accept()
+
+    # ── Daten auslesen ────────────────────────────────────────────────────────
+
+    def get_daten(self) -> dict:
+        art = ("flug" if self._radio_flug.isChecked()
+               else "beschwerde" if self._radio_beschwerde.isChecked()
+               else "nicht_mitgeflogen")
+        richtung = ("inbound" if self._radio_inbound.isChecked()
+                    else "outbound" if self._radio_outbound.isChecked()
+                    else "beides")
+        ort = self._paxannahme_ort.currentText()
+        if ort == "Sonstiges":
+            ort = self._paxannahme_sonstiges.text().strip() or "Sonstiges"
+        return dict(
+            mitarbeiter    = self._mitarbeiter.text().strip(),
+            datum          = self._datum_vorfall.date().toString("dd.MM.yyyy"),
+            verfasst_am    = self._datum_verfasst.date().toString("dd.MM.yyyy"),
+            art            = art,
+            flugnummer     = self._flugnummer.text().strip() if art == "flug" else self._flugnummer_nm.text().strip(),
+            verspaetung    = self._verspaetung_cb.isChecked(),
+            onblock        = self._onblock.time().toString("HH:mm"),
+            offblock       = self._offblock.time().toString("HH:mm"),
+            richtung       = richtung,
+            ankunft_lfz    = self._ankunft_lfz.time().toString("HH:mm"),
+            auftragsende   = self._auftragsende.time().toString("HH:mm"),
+            paxannahme_zeit = self._paxannahme_zeit.time().toString("HH:mm"),
+            paxannahme_ort = ort,
+            sachverhalt    = self._sachverhalt.toPlainText().strip(),
+            beschwerde_text = self._beschwerde_text.toPlainText().strip(),
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -247,6 +580,7 @@ class MitarbeiterDokumenteWidget(QWidget):
         super().__init__(parent)
         self._akt_kategorie: str = KATEGORIEN[0]
         self._dokumente: dict[str, list[dict]] = {}
+        self._db_eintraege: list[dict] = []
         self._build_ui()
         self.refresh()
 
@@ -365,13 +699,13 @@ class MitarbeiterDokumenteWidget(QWidget):
         return w
 
     def _build_hauptbereich(self) -> QWidget:
-        """Rechte Spalte: Dateiliste + Aktionsleiste."""
+        """Rechte Spalte: Dateiliste + Aktionsleiste (+ DB-Browser für Stellungnahmen)."""
         w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(8)
 
-        # Aktions-Buttons
+        # Aktions-Buttons (immer sichtbar)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
@@ -379,6 +713,18 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._btn_neu.setToolTip("Neues Dokument mit DRK-Kopf-/Fußzeile aus Vorlage erstellen")
         self._btn_neu.clicked.connect(lambda: self._neues_dokument())
         btn_row.addWidget(self._btn_neu)
+
+        self._btn_stellungnahme = _btn("📝  Stellungnahme", "#107e3e", "#0a5c2e")
+        self._btn_stellungnahme.setToolTip("Strukturierte Stellungnahme erstellen (Flug, Beschwerde, nicht mitgeflogen)")
+        self._btn_stellungnahme.setVisible(False)
+        self._btn_stellungnahme.clicked.connect(self._stellungnahme_erstellen)
+        btn_row.addWidget(self._btn_stellungnahme)
+
+        self._btn_web = _btn("🌐  Web-Ansicht", "#5c35cc", "#4a2aa0")
+        self._btn_web.setToolTip("Lokale Web-Ansicht der Stellungnahmen-Datenbank im Browser öffnen")
+        self._btn_web.setVisible(False)
+        self._btn_web.clicked.connect(self._web_ansicht_oeffnen)
+        btn_row.addWidget(self._btn_web)
 
         self._btn_oeffnen = _btn_light("📂  Öffnen")
         self._btn_oeffnen.setToolTip("Ausgewähltes Dokument mit Word / Standard-App öffnen")
@@ -411,15 +757,63 @@ class MitarbeiterDokumenteWidget(QWidget):
         btn_row.addWidget(self._btn_loeschen)
 
         btn_row.addStretch()
-        layout.addLayout(btn_row)
+        outer.addLayout(btn_row)
 
         # Kategorie-Titel
         self._kat_label = QLabel()
         self._kat_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self._kat_label.setStyleSheet(f"color:{FIORI_TEXT}; padding:4px 0;")
-        layout.addWidget(self._kat_label)
+        outer.addWidget(self._kat_label)
 
-        # Tabelle
+        # ── QTabWidget: Tab 0 = Dateien, Tab 1 = Datenbank ───────────────────
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabWidget::pane { border:1px solid #ddd; }
+            QTabBar::tab {
+                padding:6px 16px; font-size:12px; min-width:100px;
+                border:1px solid #ddd; border-bottom:none;
+                background:#f5f5f5; color:#555;
+                border-top-left-radius:4px; border-top-right-radius:4px;
+            }
+            QTabBar::tab:selected { background:white; color:#1565a8; font-weight:bold; }
+            QTabBar::tab:hover:!selected { background:#e8f0fb; }
+        """)
+        outer.addWidget(self._tabs, 1)
+
+        # ── TAB 0: Datei-Browser ──────────────────────────────────────────────
+        tab_dateien = QWidget()
+        tl = QVBoxLayout(tab_dateien)
+        tl.setContentsMargins(0, 8, 0, 0)
+        tl.setSpacing(6)
+
+        # ── Datei-Filter (nur Stellungnahmen) ─────────────────────────────────
+        self._datei_filter_frame = QFrame()
+        self._datei_filter_frame.setStyleSheet(
+            "QFrame{background:#f0f4ff;border:1px solid #c0ccee;"
+            "border-radius:4px;padding:2px;}"
+        )
+        self._datei_filter_frame.setVisible(False)
+        dff = QHBoxLayout(self._datei_filter_frame)
+        dff.setContentsMargins(8, 4, 8, 4)
+        dff.setSpacing(8)
+        dff.addWidget(QLabel("Jahr:"))
+        self._datei_combo_jahr = QComboBox()
+        self._datei_combo_jahr.setFixedWidth(80)
+        self._datei_combo_jahr.currentIndexChanged.connect(self._datei_filter_changed)
+        dff.addWidget(self._datei_combo_jahr)
+        dff.addWidget(QLabel("Monat:"))
+        self._datei_combo_monat = QComboBox()
+        self._datei_combo_monat.setFixedWidth(110)
+        for i, m in enumerate([
+            "Alle","Januar","Februar","März","April","Mai","Juni",
+            "Juli","August","September","Oktober","November","Dezember"
+        ]):
+            self._datei_combo_monat.addItem(m, None if i == 0 else i)
+        self._datei_combo_monat.currentIndexChanged.connect(self._datei_filter_changed)
+        dff.addWidget(self._datei_combo_monat)
+        dff.addStretch()
+        tl.addWidget(self._datei_filter_frame)
+
         self._table = QTableWidget()
         self._table.setColumnCount(3)
         self._table.setHorizontalHeaderLabels(["Dateiname", "Zuletzt geändert", "Typ"])
@@ -433,9 +827,10 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.itemSelectionChanged.connect(self._auswahl_geaendert)
         self._table.itemDoubleClicked.connect(lambda _: self._dokument_oeffnen())
-        layout.addWidget(self._table, 1)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._table_kontextmenu)
+        tl.addWidget(self._table, 1)
 
-        # Info-Box
         info = QLabel(
             "💡 <b>Doppelklick</b> öffnet ein Dokument direkt.  "
             "\"<b>Bearbeiten</b>\" ermöglicht Textänderungen im Popup – "
@@ -443,11 +838,137 @@ class MitarbeiterDokumenteWidget(QWidget):
         )
         info.setWordWrap(True)
         info.setStyleSheet(
-            "background:#e3f2fd; color:#154360; border-radius:4px; "
+            "background:#e3f2fd; color:#154360; border-radius:4px;"
             "padding:8px 12px; font-size:11px;"
         )
-        layout.addWidget(info)
+        tl.addWidget(info)
+        self._tabs.addTab(tab_dateien, "📂  Dateien")
 
+        # ── TAB 1: Datenbank-Suche ────────────────────────────────────────────
+        self._tabs.addTab(self._build_db_browser(), "🔍  Datenbank-Suche")
+        self._tabs.setTabVisible(1, False)  # nur bei Stellungnahmen sichtbar
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
+        return w
+
+    def _build_db_browser(self) -> QWidget:
+        """DB-Browser-Tab: Filter + Ergebnistabelle + Details."""
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # ── Filter-Zeile ──────────────────────────────────────────────────────
+        filter_frame = QFrame()
+        filter_frame.setStyleSheet(
+            "QFrame{background:#f8f9fa;border:1px solid #ddd;"
+            "border-radius:4px;padding:4px;}"
+        )
+        fl = QHBoxLayout(filter_frame)
+        fl.setContentsMargins(8, 6, 8, 6)
+        fl.setSpacing(10)
+
+        fl.addWidget(QLabel("Jahr:"))
+        self._db_combo_jahr = QComboBox()
+        self._db_combo_jahr.setFixedWidth(80)
+        self._db_combo_jahr.addItem("Alle", None)
+        self._db_combo_jahr.currentIndexChanged.connect(self._db_filter_changed)
+        fl.addWidget(self._db_combo_jahr)
+
+        fl.addWidget(QLabel("Monat:"))
+        self._db_combo_monat = QComboBox()
+        self._db_combo_monat.setFixedWidth(110)
+        _MONATE = [
+            "Alle", "Januar", "Februar", "März", "April", "Mai", "Juni",
+            "Juli", "August", "September", "Oktober", "November", "Dezember",
+        ]
+        for i, m in enumerate(_MONATE):
+            self._db_combo_monat.addItem(m, None if i == 0 else i)
+        self._db_combo_monat.currentIndexChanged.connect(self._db_filter_changed)
+        fl.addWidget(self._db_combo_monat)
+
+        fl.addWidget(QLabel("Art:"))
+        self._db_combo_art = QComboBox()
+        self._db_combo_art.setFixedWidth(160)
+        self._db_combo_art.addItem("Alle", None)
+        self._db_combo_art.addItem("✈️  Flug-Vorfall",       "flug")
+        self._db_combo_art.addItem("🗣️  Passagierbeschwerde", "beschwerde")
+        self._db_combo_art.addItem("🚶  Nicht mitgeflogen",  "nicht_mitgeflogen")
+        self._db_combo_art.currentIndexChanged.connect(self._db_filter_changed)
+        fl.addWidget(self._db_combo_art)
+
+        fl.addWidget(QLabel("Suche:"))
+        self._db_suche = QLineEdit()
+        self._db_suche.setPlaceholderText("Name, Flugnummer, Sachverhalt …")
+        self._db_suche.setMinimumWidth(200)
+        self._db_suche.textChanged.connect(self._db_filter_changed)
+        fl.addWidget(self._db_suche, 1)
+
+        btn_reset = _btn_light("✖ Zurücksetzen")
+        btn_reset.setFixedHeight(28)
+        btn_reset.clicked.connect(self._db_filter_reset)
+        fl.addWidget(btn_reset)
+
+        layout.addWidget(filter_frame)
+
+        # ── Ergebnis-Tabelle ──────────────────────────────────────────────────
+        self._db_table = QTableWidget()
+        self._db_table.setColumnCount(6)
+        self._db_table.setHorizontalHeaderLabels(
+            ["Datum Vorfall", "Mitarbeiter", "Art", "Flugnummer", "Verfasst am", "ID"]
+        )
+        hh = self._db_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self._db_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._db_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._db_table.setAlternatingRowColors(True)
+        self._db_table.setStyleSheet("QTableWidget{border:1px solid #ddd;font-size:12px;}")
+        self._db_table.verticalHeader().setVisible(False)
+        self._db_table.itemSelectionChanged.connect(self._db_auswahl_geaendert)
+        self._db_table.itemDoubleClicked.connect(lambda _: self._db_dokument_oeffnen())
+        layout.addWidget(self._db_table, 1)
+
+        # ── Aktions-Buttons DB ────────────────────────────────────────────────
+        db_btn_row = QHBoxLayout()
+        db_btn_row.setSpacing(8)
+
+        self._db_btn_oeffnen = _btn("📂  Dokument öffnen", FIORI_BLUE)
+        self._db_btn_oeffnen.setEnabled(False)
+        self._db_btn_oeffnen.setToolTip("Verknüpftes Word-Dokument öffnen")
+        self._db_btn_oeffnen.clicked.connect(self._db_dokument_oeffnen)
+        db_btn_row.addWidget(self._db_btn_oeffnen)
+
+        self._db_btn_details = _btn_light("🔎  Details")
+        self._db_btn_details.setEnabled(False)
+        self._db_btn_details.setToolTip("Alle gespeicherten Felder anzeigen")
+        self._db_btn_details.clicked.connect(self._db_details_anzeigen)
+        db_btn_row.addWidget(self._db_btn_details)
+
+        self._db_btn_loeschen = _btn_light("🗑  DB-Eintrag löschen")
+        self._db_btn_loeschen.setEnabled(False)
+        self._db_btn_loeschen.setToolTip(
+            "Eintrag aus der Datenbank entfernen (Word-Datei bleibt erhalten)"
+        )
+        self._db_btn_loeschen.setStyleSheet(
+            "QPushButton{background:#eee;color:#333;border:none;"
+            "border-radius:4px;padding:4px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#ffcccc;color:#a00;}"
+            "QPushButton:disabled{background:#f5f5f5;color:#bbb;}"
+        )
+        self._db_btn_loeschen.clicked.connect(self._db_eintrag_loeschen)
+        db_btn_row.addWidget(self._db_btn_loeschen)
+
+        db_btn_row.addStretch()
+        self._db_treffer_lbl = QLabel()
+        self._db_treffer_lbl.setStyleSheet("color:#666; font-size:11px;")
+        db_btn_row.addWidget(self._db_treffer_lbl)
+
+        layout.addLayout(db_btn_row)
         return w
 
     # ── Refresh / Laden ───────────────────────────────────────────────────────
@@ -471,20 +992,33 @@ class MitarbeiterDokumenteWidget(QWidget):
         """Tabelle mit Dateien der gewählten Kategorie befüllen."""
         self._akt_kategorie = kategorie
         self._kat_label.setText(f"📁  {kategorie}")
-        dateien = self._dokumente.get(kategorie, [])
+        is_stell = (kategorie == "Stellungnahmen")
+        self._btn_stellungnahme.setVisible(is_stell)
+        self._btn_web.setVisible(is_stell)
+        self._tabs.setTabVisible(1, is_stell)
 
-        self._table.setRowCount(len(dateien))
-        for row, d in enumerate(dateien):
-            name_item = QTableWidgetItem(d["name"])
-            ext = os.path.splitext(d["name"])[1].lower()
-            icon_map = {".docx": "📝", ".doc": "📝", ".pdf": "📕", ".txt": "📄"}
-            name_item.setIcon(QIcon())  # Kein Icon nötig – Text reicht
-            self._table.setItem(row, 0, QTableWidgetItem(
-                f"{icon_map.get(ext, '📄')}  {d['name']}"
-            ))
-            self._table.setItem(row, 1, QTableWidgetItem(d["geaendert"]))
-            self._table.setItem(row, 2, QTableWidgetItem(ext.upper().lstrip(".")))
+        # Filter-Bar für Dateien-Tab bei Stellungnahmen
+        self._datei_filter_frame.setVisible(is_stell)
+        if is_stell:
+            # Jahre aus vorhandenen Dateien befüllen
+            dateien = self._dokumente.get("Stellungnahmen", [])
+            jahre = sorted(
+                {
+                    d["geaendert"].split(".")[2].split(" ")[0]
+                    for d in dateien
+                    if len(d.get("geaendert", "").split(".")) >= 3
+                },
+                reverse=True
+            )
+            self._datei_combo_jahr.blockSignals(True)
+            self._datei_combo_jahr.clear()
+            self._datei_combo_jahr.addItem("Alle", None)
+            for j in jahre:
+                self._datei_combo_jahr.addItem(j, j)
+            self._datei_combo_jahr.blockSignals(False)
+            self._datei_combo_monat.setCurrentIndex(0)
 
+        self._datei_filter_changed()
         self._auswahl_geaendert()
 
     # ── Ereignis-Handler ──────────────────────────────────────────────────────
@@ -582,6 +1116,334 @@ class MitarbeiterDokumenteWidget(QWidget):
                     oeffne_datei(pfad)
             except Exception as e:
                 QMessageBox.critical(self, "Fehler beim Erstellen", str(e))
+
+    def _stellungnahme_erstellen(self):
+        """Öffnet den Stellungnahme-Assistenten und erstellt das Word-Dokument."""
+        dlg = _StellungnahmeDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        daten = dlg.get_daten()
+        try:
+            intern_pfad, extern_pfad = erstelle_stellungnahme(daten)
+            self.refresh()
+            # Zur Stellungnahmen-Kategorie wechseln
+            if "Stellungnahmen" in KATEGORIEN:
+                idx = KATEGORIEN.index("Stellungnahmen")
+                self._kat_list.setCurrentRow(idx)
+            antwort = QMessageBox.question(
+                self,
+                "Stellungnahme erstellt",
+                f"Die Stellungnahme wurde erfolgreich gespeichert:\n\n"
+                f"📂 Intern:  {intern_pfad}\n"
+                f"📂 Extern:  {extern_pfad}\n\n"
+                f"Dokument jetzt öffnen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if antwort == QMessageBox.StandardButton.Yes:
+                oeffne_datei(intern_pfad)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Fehler beim Erstellen der Stellungnahme", str(exc)
+            )
+
+    def _table_kontextmenu(self, pos):
+        """Rechtsklick-Menü auf Datei-Tabelle."""
+        from PySide6.QtWidgets import QMenu
+        import subprocess
+        row = self._table.rowAt(pos.y())
+        if row < 0:
+            return
+        dateien = [
+            d for d in self._dokumente.get(self._akt_kategorie, [])
+            if self._table.item(row, 0) and
+            d["name"] in (self._table.item(row, 0).text() or "")
+        ]
+        if not dateien:
+            # Fallback: Ordner der Kategorie öffnen
+            pfad = os.path.join(DOKUMENTE_BASIS, self._akt_kategorie)
+        else:
+            pfad = dateien[0]["pfad"]
+
+        self._table.setCurrentCell(row, 0)
+        menu = QMenu(self)
+        act_explorer   = menu.addAction("📂  Im Explorer anzeigen")
+        act_oeffnen    = menu.addAction("📄  Öffnen")
+        menu.addSeparator()
+        act_bearbeiten = menu.addAction("✏  Bearbeiten")
+        act_umbenennen = menu.addAction("🔤  Umbenennen")
+        act_loeschen   = menu.addAction("🗑  Löschen")
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if action == act_explorer:
+            subprocess.Popen(["explorer", "/select,", pfad])
+        elif action == act_oeffnen:
+            oeffne_datei(pfad)
+        elif action == act_bearbeiten:
+            self._dokument_bearbeiten()
+        elif action == act_umbenennen:
+            self._dokument_umbenennen()
+        elif action == act_loeschen:
+            self._dokument_loeschen()
+
+    def _datei_filter_changed(self):
+        """Dateitabelle nach Jahr/Monat filtern und neu befüllen."""
+        kategorie = self._akt_kategorie
+        alle_dateien = self._dokumente.get(kategorie, [])
+
+        if self._datei_filter_frame.isVisible():
+            jahr_filter  = self._datei_combo_jahr.currentData()
+            monat_filter = self._datei_combo_monat.currentData()
+            dateien = []
+            for d in alle_dateien:
+                g = d.get("geaendert", "")
+                # Format: dd.MM.yyyy HH:mm oder dd.MM.yyyy
+                parts = g.replace(" ", ".").split(".")
+                try:
+                    d_monat = int(parts[1]) if len(parts) > 1 else 0
+                    d_jahr  = parts[2] if len(parts) > 2 else ""
+                except (ValueError, IndexError):
+                    d_monat, d_jahr = 0, ""
+                if jahr_filter and d_jahr != jahr_filter:
+                    continue
+                if monat_filter and d_monat != monat_filter:
+                    continue
+                dateien.append(d)
+        else:
+            dateien = alle_dateien
+
+        is_stell = (kategorie == "Stellungnahmen")
+        if is_stell:
+            self._table.setColumnCount(5)
+            self._table.setHorizontalHeaderLabels(["Dateiname", "Art", "Mitarbeiter", "Zuletzt geändert", "Typ"])
+            self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+            try:
+                alle_db = db_lade_alle()
+                db_lookup = {os.path.basename(e.get("pfad_intern", "")): e for e in alle_db}
+            except Exception:
+                db_lookup = {}
+        else:
+            self._table.setColumnCount(3)
+            self._table.setHorizontalHeaderLabels(["Dateiname", "Zuletzt geändert", "Typ"])
+            self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            db_lookup = {}
+
+        icon_map = {".docx": "📝", ".doc": "📝", ".pdf": "📕", ".txt": "📄"}
+        self._table.setRowCount(len(dateien))
+        for row, d in enumerate(dateien):
+            ext = os.path.splitext(d["name"])[1].lower()
+            self._table.setItem(row, 0, QTableWidgetItem(
+                f"{icon_map.get(ext, '📄')}  {d['name']}"
+            ))
+            if is_stell:
+                db_e = db_lookup.get(d["name"], {})
+                self._table.setItem(row, 1, QTableWidgetItem(db_e.get("art_label", "—")))
+                self._table.setItem(row, 2, QTableWidgetItem(db_e.get("mitarbeiter", "—")))
+                self._table.setItem(row, 3, QTableWidgetItem(d["geaendert"]))
+                self._table.setItem(row, 4, QTableWidgetItem(ext.upper().lstrip(".")))
+            else:
+                self._table.setItem(row, 1, QTableWidgetItem(d["geaendert"]))
+                self._table.setItem(row, 2, QTableWidgetItem(ext.upper().lstrip(".")))
+        self._auswahl_geaendert()
+
+    def _web_ansicht_oeffnen(self):
+        """Öffnet die lokale Web-Ansicht im Standard-Browser."""
+        try:
+            from functions.stellungnahmen_html_export import generiere_html, html_pfad
+            generiere_html()
+            pfad = html_pfad()
+            url = "file:///" + pfad.replace("\\", "/")
+            webbrowser.open(url)
+        except Exception as exc:
+            QMessageBox.warning(self, "Web-Ansicht", f"Fehler beim Öffnen der Web-Ansicht:\n{exc}")
+
+    # ── Datenbank-Browser ─────────────────────────────────────────────────────
+
+    def _on_tab_changed(self, idx: int):
+        if idx == 1:
+            self._db_jahre_aktualisieren()
+            self._db_lade()
+
+    def _db_jahre_aktualisieren(self):
+        """Jahr-Combobox mit vorhandenen Werten aus der DB befüllen."""
+        current = self._db_combo_jahr.currentData()
+        self._db_combo_jahr.blockSignals(True)
+        self._db_combo_jahr.clear()
+        self._db_combo_jahr.addItem("Alle", None)
+        for j in db_jahre():
+            self._db_combo_jahr.addItem(str(j), j)
+        for i in range(self._db_combo_jahr.count()):
+            if self._db_combo_jahr.itemData(i) == current:
+                self._db_combo_jahr.setCurrentIndex(i)
+                break
+        self._db_combo_jahr.blockSignals(False)
+
+    def _db_filter_reset(self):
+        self._db_combo_jahr.blockSignals(True)
+        self._db_combo_monat.blockSignals(True)
+        self._db_combo_art.blockSignals(True)
+        self._db_suche.blockSignals(True)
+        self._db_combo_jahr.setCurrentIndex(0)
+        self._db_combo_monat.setCurrentIndex(0)
+        self._db_combo_art.setCurrentIndex(0)
+        self._db_suche.clear()
+        self._db_combo_jahr.blockSignals(False)
+        self._db_combo_monat.blockSignals(False)
+        self._db_combo_art.blockSignals(False)
+        self._db_suche.blockSignals(False)
+        self._db_lade()
+
+    def _db_filter_changed(self):
+        self._db_lade()
+
+    def _db_lade(self):
+        """Datenbank abfragen und Tabelle befüllen."""
+        jahr   = self._db_combo_jahr.currentData()
+        monat  = self._db_combo_monat.currentData()
+        art    = self._db_combo_art.currentData()
+        suche  = self._db_suche.text().strip() or None
+
+        try:
+            eintraege = db_lade_alle(monat=monat, jahr=jahr, art=art, suchtext=suche)
+        except Exception as exc:
+            QMessageBox.critical(self, "Datenbankfehler", str(exc))
+            return
+
+        self._db_table.setRowCount(len(eintraege))
+        self._db_eintraege = eintraege
+        for row, e in enumerate(eintraege):
+            self._db_table.setItem(row, 0, QTableWidgetItem(e.get("datum_vorfall", "")))
+            self._db_table.setItem(row, 1, QTableWidgetItem(e.get("mitarbeiter", "")))
+            self._db_table.setItem(row, 2, QTableWidgetItem(e.get("art_label", "")))
+            fn = e.get("flugnummer", "")
+            self._db_table.setItem(row, 3, QTableWidgetItem(fn if fn else "\u2014"))
+            self._db_table.setItem(row, 4, QTableWidgetItem(e.get("verfasst_am", "")))
+            id_item = QTableWidgetItem(str(e.get("id", "")))
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._db_table.setItem(row, 5, id_item)
+
+        n = len(eintraege)
+        self._db_treffer_lbl.setText(f"{n} Eintrag{'e' if n != 1 else ''} gefunden")
+        self._db_auswahl_geaendert()
+
+    def _db_auswahl_geaendert(self):
+        hat_auswahl = bool(self._db_aktuell_eintrag())
+        self._db_btn_oeffnen.setEnabled(hat_auswahl)
+        self._db_btn_details.setEnabled(hat_auswahl)
+        self._db_btn_loeschen.setEnabled(hat_auswahl)
+
+    def _db_aktuell_eintrag(self) -> dict | None:
+        rows = self._db_table.selectedItems()
+        if not rows:
+            return None
+        row = self._db_table.currentRow()
+        try:
+            return self._db_eintraege[row]
+        except (AttributeError, IndexError):
+            return None
+
+    def _db_dokument_oeffnen(self):
+        e = self._db_aktuell_eintrag()
+        if not e:
+            return
+        pfad = e.get("pfad_intern", "")
+        if os.path.isfile(pfad):
+            oeffne_datei(pfad)
+        else:
+            pfad_ext = e.get("pfad_extern", "")
+            if os.path.isfile(pfad_ext):
+                antwort = QMessageBox.question(
+                    self, "Datei nicht gefunden",
+                    f"Die interne Datei wurde nicht gefunden:\n{pfad}\n\n"
+                    f"Soll stattdessen die externe Kopie ge\u00f6ffnet werden?\n{pfad_ext}",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if antwort == QMessageBox.StandardButton.Yes:
+                    oeffne_datei(pfad_ext)
+            else:
+                QMessageBox.warning(
+                    self, "Datei nicht gefunden",
+                    f"Das verkn\u00fcpfte Dokument wurde nicht gefunden:\n\n{pfad}\n\n"
+                    "M\u00f6glicherweise wurde es verschoben oder gel\u00f6scht."
+                )
+
+    def _db_details_anzeigen(self):
+        e = self._db_aktuell_eintrag()
+        if not e:
+            return
+        _ART_MAP = {
+            "flug": "\u2708\ufe0f Flug-Vorfall",
+            "beschwerde": "\U0001f5e3\ufe0f Passagierbeschwerde",
+            "nicht_mitgeflogen": "\U0001f6b6 Nicht mitgeflogen",
+        }
+        zeilen = [
+            ("ID",               str(e.get("id", ""))),
+            ("Erstellt am",      e.get("erstellt_am", "")),
+            ("Datum Vorfall",    e.get("datum_vorfall", "")),
+            ("Verfasst am",      e.get("verfasst_am", "")),
+            ("Mitarbeiter",      e.get("mitarbeiter", "")),
+            ("Art",              _ART_MAP.get(e.get("art", ""), e.get("art", ""))),
+            ("Flugnummer",       e.get("flugnummer", "") or "\u2014"),
+            ("Versp\u00e4tung",  "\u2705 Ja" if e.get("verspaetung") else "\u274c Nein"),
+            ("Onblock",          e.get("onblock", "") or "\u2014"),
+            ("Offblock",         e.get("offblock", "") or "\u2014"),
+            ("Flugrichtung",     e.get("richtung", "") or "\u2014"),
+            ("Ankunft LFZ",      e.get("ankunft_lfz", "") or "\u2014"),
+            ("Auftragsende",     e.get("auftragsende", "") or "\u2014"),
+            ("Paxannahme-Zeit",  e.get("paxannahme_zeit", "") or "\u2014"),
+            ("Paxannahme-Ort",   e.get("paxannahme_ort", "") or "\u2014"),
+            ("Sachverhalt",      e.get("sachverhalt", "") or "\u2014"),
+            ("Beschwerde-Text",  e.get("beschwerde_text", "") or "\u2014"),
+            ("Datei (intern)",   e.get("pfad_intern", "")),
+            ("Datei (extern)",   e.get("pfad_extern", "") or "\u2014"),
+        ]
+        text = "\n".join(f"{k:<22} {v}" for k, v in zeilen)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(
+            f"\U0001f50e Details \u2013 {e.get('mitarbeiter', '')} ({e.get('datum_vorfall', '')})"
+        )
+        dlg.resize(700, 540)
+        vl = QVBoxLayout(dlg)
+        te = QTextEdit()
+        te.setReadOnly(True)
+        te.setFont(QFont("Courier New", 10))
+        te.setPlainText(text)
+        vl.addWidget(te)
+        btns = QHBoxLayout()
+        btn_oeffnen = _btn("\U0001f4c2  Dokument \u00f6ffnen", FIORI_BLUE)
+        btn_oeffnen.clicked.connect(lambda: (dlg.accept(), self._db_dokument_oeffnen()))
+        btns.addWidget(btn_oeffnen)
+        btns.addStretch()
+        close_btn = _btn_light("Schlie\u00dfen")
+        close_btn.clicked.connect(dlg.accept)
+        btns.addWidget(close_btn)
+        vl.addLayout(btns)
+        dlg.exec()
+
+    def _db_eintrag_loeschen(self):
+        e = self._db_aktuell_eintrag()
+        if not e:
+            return
+        antwort = QMessageBox.question(
+            self, "DB-Eintrag l\u00f6schen",
+            f"Datensatz wirklich aus der Datenbank entfernen?\n\n"
+            f"Mitarbeiter:  {e.get('mitarbeiter', '')}\n"
+            f"Datum:         {e.get('datum_vorfall', '')}\n"
+            f"Art:           {e.get('art_label', '')}\n\n"
+            f"\u26a0 Das Word-Dokument wird NICHT gel\u00f6scht.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            try:
+                db_eintrag_loeschen(e["id"])
+                self._db_lade()
+            except Exception as exc:
+                QMessageBox.critical(self, "Fehler", str(exc))
 
     def _dokument_loeschen(self):
         eintrag = self._aktueller_eintrag()

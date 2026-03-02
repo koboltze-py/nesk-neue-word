@@ -1208,6 +1208,60 @@ class UebergabeWidget(QWidget):
         att_row.addStretch()
         dlg_layout.addLayout(att_row)
 
+        # ── Stellungnahmen-Link Sektion ───────────────────────────────────────
+        from PySide6.QtWidgets import QComboBox as _QComboBox
+        stell_outer = QFrame()
+        stell_outer.setStyleSheet(
+            "QFrame{border:1px solid #6a4cc0;border-radius:5px;background:#f5f0ff;}"
+        )
+        stell_outer_vl = QVBoxLayout(stell_outer)
+        stell_outer_vl.setContentsMargins(10, 8, 10, 8)
+        stell_outer_vl.setSpacing(6)
+
+        cb_stell_link = QCheckBox("📋  Stellungnahmen-Link in E-Mail anhängen")
+        cb_stell_link.setStyleSheet("font-weight:bold;font-size:11px;border:none;")
+        stell_outer_vl.addWidget(cb_stell_link)
+
+        stell_detail = QFrame()
+        stell_detail.setStyleSheet("QFrame{border:none;background:transparent;}")
+        stell_detail.setVisible(False)
+        stell_detail_vl = QVBoxLayout(stell_detail)
+        stell_detail_vl.setContentsMargins(0, 0, 0, 0)
+        stell_detail_vl.setSpacing(4)
+
+        stell_hint = QLabel("ℹ️  Allgemeiner Link oder spezifischen Fall auswählen:")
+        stell_hint.setStyleSheet("font-size:10px;color:#555;border:none;")
+        stell_detail_vl.addWidget(stell_hint)
+
+        combo_stell_fall = _QComboBox()
+        combo_stell_fall.setStyleSheet("font-size:11px;")
+        combo_stell_fall.addItem("— Allgemeiner Link (kein spezifischer Fall) —", None)
+        try:
+            from functions.stellungnahmen_db import lade_alle as _stell_alle, _ART_LABEL as _ALBL
+            for _e in _stell_alle()[:30]:
+                _lbl = f"#{_e['id']} – {_e.get('mitarbeiter','')} – {_e.get('datum_vorfall','')} – {_ALBL.get(_e.get('art',''),'')}"
+                combo_stell_fall.addItem(_lbl, _e["id"])
+        except Exception:
+            pass
+        stell_detail_vl.addWidget(combo_stell_fall)
+
+        cb_stell_anhang = QCheckBox("📎  Word-Dokument des ausgewählten Falls anhängen")
+        cb_stell_anhang.setStyleSheet("font-size:10px;border:none;")
+        cb_stell_anhang.setEnabled(False)  # erst aktiv wenn ein Fall gewählt
+        stell_detail_vl.addWidget(cb_stell_anhang)
+
+        def _on_fall_changed():
+            hat_fall = combo_stell_fall.currentData() is not None
+            cb_stell_anhang.setEnabled(hat_fall)
+            if not hat_fall:
+                cb_stell_anhang.setChecked(False)
+        combo_stell_fall.currentIndexChanged.connect(_on_fall_changed)
+
+        stell_outer_vl.addWidget(stell_detail)
+
+        cb_stell_link.toggled.connect(stell_detail.setVisible)
+        dlg_layout.addWidget(stell_outer)
+
         def _add_att():
             paths, _ = QFileDialog.getOpenFileNames(dlg, "Datei(en) auswählen")
             for p in paths:
@@ -1267,10 +1321,45 @@ class UebergabeWidget(QWidget):
                     )
                 body_text += "\n" + "\n".join(sch_lines)
 
+            # Stellungnahmen-Link einfügen
+            if cb_stell_link.isChecked():
+                try:
+                    from functions.stellungnahmen_html_export import html_pfad as _html_pfad
+                    _html_url = "file:///" + _html_pfad().replace("\\", "/")
+                    _fall_id = combo_stell_fall.currentData()
+                    _full_url = f"{_html_url}#id-{_fall_id}" if _fall_id else _html_url
+                    _link_text = "Stellungnahmen-Datenbank öffnen" if not _fall_id else f"Stellungnahme #{_fall_id} öffnen"
+                    _ref_line = f"<br><small style='color:#555'>Referenz: {combo_stell_fall.currentText()}</small>" if _fall_id else ""
+                    body_text += (
+                        "<br><hr style='border:none;border-top:1px solid #ccc;margin:12px 0'>"
+                        "<b>📋 Stellungnahmen-Datenbank:</b><br>"
+                        f"<a href='{_full_url}' style='color:#0563C1;text-decoration:underline;'>{_link_text}</a>"
+                        f"{_ref_line}"
+                    )
+                except Exception:
+                    pass
+
             to_val = an_edit.text().strip()
             cc_val = cc_edit.text().strip()
             subj   = subj_edit.text().strip()
             atts   = [att_list.item(i).text() for i in range(att_list.count())]
+
+            # Word-Dokument der ausgewählten Stellungnahme anhängen
+            if cb_stell_link.isChecked() and cb_stell_anhang.isChecked():
+                _fall_id_att = combo_stell_fall.currentData()
+                if _fall_id_att:
+                    try:
+                        from functions.stellungnahmen_db import get_eintrag as _get_sn
+                        _sn = _get_sn(_fall_id_att)
+                        if _sn:
+                            import os as _os
+                            _doc_pfad = _sn.get("pfad_intern") or _sn.get("pfad_extern") or ""
+                            if _doc_pfad and _os.path.isfile(_doc_pfad):
+                                atts.append(_doc_pfad)
+                            elif _sn.get("pfad_extern") and _os.path.isfile(_sn["pfad_extern"]):
+                                atts.append(_sn["pfad_extern"])
+                    except Exception:
+                        pass
             try:
                 create_outlook_draft(
                     to=to_val,

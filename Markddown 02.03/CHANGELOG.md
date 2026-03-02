@@ -1,189 +1,135 @@
 # Changelog – Nesk3
 
-Alle Änderungen in chronologischer Reihenfolge.  
-Format: `[Datum] Beschreibung – betroffene Dateien`
+Alle Änderungen in chronologischer Reihenfolge.
+
+---
+
+## 02.03.2026 – v3.1.1
+
+### Stellungnahmen Dateien-Tab: Art + Mitarbeiter Spalten
+
+#### `_datei_filter_changed()` (gui/mitarbeiter_dokumente.py)
+- Bei Kategorie „Stellungnahmen": Tabelle wechselt auf **5 Spalten**
+  - `Dateiname | Art | Mitarbeiter | Zuletzt geändert | Typ`
+- Art + Mitarbeiter werden per `db_lade_alle()` aus der SQLite-DB nachgeschlagen
+  - Lookup-Key: Dateiname (`os.path.basename(pfad_intern)`)
+  - Falls kein DB-Eintrag vorhanden: zeigt `—`
+- Für alle anderen Kategorien bleiben 3 Spalten (`Dateiname | Zuletzt geändert | Typ`)
+- Spaltenbreiten: Dateiname Stretch, alle anderen ResizeToContents
+
+#### `_table_kontextmenu()` (gui/mitarbeiter_dokumente.py)
+- Rechtsklick-Menü erweitert um (nach Separator):
+  - `✏  Bearbeiten` → ruft `_dokument_bearbeiten()` auf
+  - `🔤  Umbenennen` → ruft `_dokument_umbenennen()` auf
+  - `🗑  Löschen` → ruft `_dokument_loeschen()` auf
+- Zeile wird vor Menu-Öffnen via `setCurrentCell(row, 0)` selektiert
+
+---
+
+## 02.03.2026 – v3.1.0
+
+### Stellungnahmen: Assistent + Datenbank + lokale Web-Ansicht
+
+#### `_StellungnahmeDialog` (gui/mitarbeiter_dokumente.py)
+- Kontextabhängiger Dialog mit 3 Vorfall-Typen:
+  - **Flug-Vorfall**: Flugnummer, Verspätungs-CB → Onblock/Offblock, Richtung (Inbound/Outbound/Beides), Inbound-Zeiten (Ankunft LFZ, Auftragsende), Outbound-Zeiten (Paxannahme-Zeit + Ort), Sachverhalt
+  - **Passagierbeschwerde**: Onblock, Offblock, Sachverhalt, Beschwerdetext
+  - **Nicht mitgeflogen**: Flugnummer + Sachverhalt
+- Pflichtfeld-Validierung vor Speichern
+- Speichert in ZWEI Pfaden: intern (`Daten/Mitarbeiterdokumente/Stellungnahmen/`) + extern (`97_Stellungnahmen/`)
+- Word-Dokument mit DRK-Kopf-/Fußzeile, formatierte Abschnitte je Typ
+
+#### `functions/stellungnahmen_db.py`
+- SQLite-DB: `Daten/Mitarbeiterdokumente/Datenbank/stellungnahmen.db`
+- Speichert Metadaten (kein Word-Inhalt): Mitarbeiter, Datum, Art, Flugnummer, alle Zeitfelder, Sachverhalt, Dateipfade
+- `lade_alle(monat, jahr, art, suchtext)`, `verfuegbare_jahre()`, `eintrag_speichern()`, `eintrag_loeschen()`
+- Automatischer DB-Eintrag nach `erstelle_stellungnahme()`
+- HTML-Ansicht wird automatisch nach Save/Delete regeneriert
+
+#### DB-Browser Tab (gui/mitarbeiter_dokumente.py)
+- Tab „🔍 Datenbank-Suche" – nur sichtbar bei Kategorie "Stellungnahmen"
+- Filter: Jahr, Monat, Art, Freitext (Mitarbeiter/Flugnummer/Sachverhalt)
+- Tabelle: Datum, Mitarbeiter, Art, Flugnummer, Verfasst am, ID
+- Aktionen: Dokument öffnen (intern→extern Fallback), Details, DB-Eintrag löschen
+
+#### Lokale Web-Ansicht (`WebNesk/stellungnahmen_lokal.html`)
+- Statische HTML-Seite – läuft ohne Server direkt per `file://`
+- Generiert von `functions/stellungnahmen_html_export.py`  
+- Volltextsuche, Filter (Jahr/Monat/Art), Detailansicht aller Felder
+- Dateipfad-Anzeige + Copy-to-Clipboard
+- URL-Hash-Navigation: `#id-42` springt direkt zu Datensatz 42
+- Button „🌐 Web-Ansicht" in der App öffnet Seite im Standardbrowser
+
+#### Übergabe-E-Mail Erweiterung (gui/uebergabe.py)
+- Neues Optionsfeld „📋 Stellungnahmen-Link anhängen"
+  - Allgemeiner Link zur HTML-Seite (`file:///...stellungnahmen_lokal.html`)
+  - Optional: Direktverweis auf Einzelfall (`...html#id-42`)
+  - Auswahl-ComboBox mit den letzten 30 Stellungnahmen
 
 ---
 
 ## 02.03.2026 – v3.0.0
 
-### Neuer Navigationsbereich: Mitarbeiter-Dokumente
+### Mitarbeiter-Dokumente Widget
 
-**Feature:** Neuer Button „👥 Mitarbeiter" in der Sidebar direkt unterhalb von Dashboard.
+#### gui/main_window.py
+- `NAV_ITEMS`: `("👥", "Mitarbeiter", 1)` eingefügt, alle Folge-Indizes +1
+- Import + Stack: `MitarbeiterDokumenteWidget` an Index 1
 
-#### Navigation (`gui/main_window.py`)
-- `NAV_ITEMS` erweitert: neuer Eintrag `("👥", "Mitarbeiter", 1)` nach Dashboard (Index 0)
-- Alle nachfolgenden Indizes um 1 verschoben (Aufgaben Tag → 2, Aufgaben Nacht → 3, …, Einstellungen → 11)
-- `NAV_TOOLTIPS` erweitert: `"Mitarbeiter-Dokumente: Stellungnahmen, Bescheinigungen und Word-Dokumente mit DRK-Vorlage erstellen"`
-- Import: `from gui.mitarbeiter_dokumente import MitarbeiterDokuementeWidget`
-- `_build_content()`: `self._mitarbeiter_dok_page = MitarbeiterDokuementeWidget()` zum Stack hinzugefügt
-- `_navigate(1)`: ruft `self._mitarbeiter_dok_page.refresh()` auf
+#### gui/mitarbeiter_dokumente.py
+- `MitarbeiterDokumenteWidget`: Titelleiste, Kategorieliste (6 Kat.), Dateitabelle
+- Buttons: ＋ Neues Dokument · 📝 Stellungnahme · 📂 Öffnen · ✏ Bearbeiten · 🔤 Umbenennen · 🗑 Löschen
+- `_NeuesDokumentDialog`, `_DokumentBearbeitenDialog`, `_StellungnahmeDialog`
 
-#### Neues Widget (`gui/mitarbeiter_dokumente.py`) – `MitarbeiterDokuementeWidget`
-- **Titelleiste** (blau): Titel „👥 Mitarbeiter-Dokumente" + „📂 Ordner öffnen" + „🔄 Refresh"
-- **Linke Sidebar**: `QListWidget` mit Kategorien inkl. Dateianzahl-Badge
-  - Kategorien: Stellungnahmen · Bescheinigungen · Dienstanweisungen · Abmahnungen · Lob & Anerkennung · Sonstiges
-  - Vorlage-Status-Anzeige unten (grün ✅ / orange ⚠)
-- **Rechte Hauptfläche**: Aktions-Buttons + Dateitabelle (Name, Geändert, Typ)
-  - **＋ Neues Dokument**: Öffnet `_NeuesDokumentDialog` (Kategorie, Titel, Mitarbeiter, Datum, Inhalt)
-  - **📂 Öffnen**: Markiertes Dokument mit OS-Standardprogramm öffnen
-  - **✏ Bearbeiten**: Öffnet `_DokumentBearbeitenDialog` – Texteditor-Popup, Speichern erzeugt neues Word-Dokument mit Vorlage
-  - **🔤 Umbenennen**: Dateiname ändern per Eingabedialog
-  - **🗑 Löschen**: Dokument dauerhaft entfernen (mit Bestätigung)
-  - **Doppelklick** auf Tabellenzeile: öffnet Dokument direkt
-- **Info-Box** unten: erklärt Doppelklick- und Bearbeiten-Funktion
+#### functions/mitarbeiter_dokumente_functions.py
+- `STELLUNGNAHMEN_EXTERN_PFAD` → `../97_Stellungnahmen/`
+- `erstelle_stellungnahme(daten)` → `(intern_pfad, extern_pfad)`
+- `erstelle_dokument_aus_vorlage()`, `lade_dokumente_nach_kategorie()`
 
-#### Neue Dialoge in `gui/mitarbeiter_dokumente.py`
-- **`_NeuesDokumentDialog`**: Formular für Kategorie, Titel, Mitarbeiter, Datum, Inhalt (Pflichtfeld-Validierung)
-  - Zeigt grüne/orangene Info-Box je nachdem ob Vorlage vorhanden
-- **`_DokumentBearbeitenDialog`**: Bearbeitungs-Popup
-  - Liest `.docx`/`.txt` aus, zeigt Absätze als editierbaren Text
-  - „💾 Übernehmen & neu erstellen" erzeugt aktualisiertes Word-Dokument
+#### Fahrzeuge
+- `aktualisiere_status_eintrag(id, status, von, bis, grund)` in fahrzeug_functions.py
+- `_StatusBearbeitenDialog` + Doppelklick-Support in gui/fahrzeuge.py
 
-#### Neue Hilfsfunktionen (`functions/mitarbeiter_dokumente_functions.py`)
-- `VORLAGE_PFAD`: Zeigt auf `Daten/Mitarbeiter Vorlagen/Kopf und Fußzeile/Stärkemeldung 31.01.2026 bis 01.02.2026.docx`
-- `DOKUMENTE_BASIS`: `Daten/Mitarbeiterdokumente/` – Ausgabe-Ordner für erstellte Dokumente
-- `KATEGORIEN`: Liste der 6 Dokumentenkategorien
-- `sicherungsordner()`: Legt `DOKUMENTE_BASIS` und alle Kategorie-Unterordner an
-- `lade_dokumente_nach_kategorie()`: Gibt Dict `{Kategorie: [{name, pfad, geaendert}]}` zurück
-- `erstelle_dokument_aus_vorlage(kategorie, titel, mitarbeiter, datum, inhalt, dateiname)`:
-  - Öffnet DRK-Vorlage (inkl. Kopf-/Fußzeile) per `python-docx`
-  - Entfernt Body-Inhalt, fügt Titel (fett, 16pt, zentriert), Meta-Block und Inhalt neu ein
-  - Fügt Abschluss-Block: Ort+Datum, Unterschrift-Zeile hinzu
-  - Fallback auf leeres Dokument wenn Vorlage nicht gefunden
-- `oeffne_datei(pfad)`: Öffnet Datei per Windows-Standardprogramm (`start`)
-- `loesche_dokument(pfad)`: Sicheres Löschen mit Rückgabe bool
-- `umbenennen_dokument(alter_pfad, neuer_name)`: Umbenennen, Rückgabe neuer Pfad
-
-#### Neuer Ordner angelegt
-- `Daten/Mitarbeiterdokumente/` mit Unterordnern:
-  - `Stellungnahmen/`, `Bescheinigungen/`, `Dienstanweisungen/`, `Abmahnungen/`, `Lob & Anerkennung/`, `Sonstiges/`
+#### Dienstplan
+- `_DispoZeitenVorschauDialog`: 6-spaltig, manuell bearbeitbar
+- `round_dispo=True/False` Parameter in DienstplanParser
+- `manuell_geaendert`-Flag verhindert erneutes Runden beim Export
 
 ---
 
-## 02.03.2026 – Fahrzeuge Status-Verlauf editierbar
+## 26.02.2026 – v2.9.x
 
-### Fahrzeuge: Status-Einträge bearbeiten
-
-**Feature:** Status-Historieneinträge können nun bearbeitet werden (alle Felder inkl. Grund).
-
-#### `functions/fahrzeug_functions.py`
-- Neue Funktion `aktualisiere_status_eintrag(eintrag_id, status, von, bis, grund) -> bool`
-  - `UPDATE fahrzeug_status SET status, von, bis, grund WHERE id`
-
-#### `gui/fahrzeuge.py`
-- Import um `aktualisiere_status_eintrag` ergänzt
-- Neue Klasse `_StatusBearbeitenDialog(QDialog)`:
-  - Vorausfüllung aller Felder aus bestehendem Eintrag (Status-ComboBox, Von/Bis-Datum, Unbestimmt-Checkbox, Grund)
-- `_tab_status`: Ersetzt alten „Markierten Eintrag löschen"-Button durch:
-  - `✏ Eintrag bearbeiten` (blauer Hover) → `_StatusBearbeitenDialog`
-  - `🗑 Eintrag löschen` (roter Hover)
-  - **Doppelklick** auf Tabellenzeile öffnet Bearbeitungsdialog
-
----
-
-## 02.03.2026 – Dispo-Zeiten Word-Export
-
-### Dienstplan: Dispo-Zeiten Vorschau-Popup
-
-**Feature:** Vor dem Word-Export erscheint ein Popup das Excel-Originalzeiten vs. Export-Zeiten für Dispo-Personen vergleicht.
-
-#### `gui/dienstplan.py` – `_DispoZeitenVorschauDialog`
-- 6-spaltige Tabelle: Name · Dienst · Von (Excel) · Bis (Excel) · Von (Export) · Bis (Export)
-- Export-Spalten blau+fett wenn Abweichung zur Excel-Spalte vorhanden
-- Zeiten manuell bearbeitbar per `_edit_row(row)`
-- `manuell_geaendert`-Flag auf Person-Dict → unterdrückt automatisches Runden im Exporter
-
-#### `functions/dienstplan_parser.py`
-- Neuer Parameter `round_dispo=True` in `DienstplanParser.__init__()`
-- Bei `round_dispo=False`: keine Runden für Dispo-Zeiten → für Rohwert-Anzeige
-
-#### `functions/staerkemeldung_export.py`
-- `_add_dienst_gruppe`: Rundet Dispo-Zeiten NICHT wenn `person.get('manuell_geaendert')` gesetzt
-
----
-
-## 26.02.2026 – v2.9.4
-
-### Erklär-Boxen und Tooltips in der gesamten App
-
-#### Mitarbeiter: Export-Info-Box
-- **`gui/mitarbeiter.py`** – Gelbe Info-Box erklärt Export-Spalte (✅/🚫)
-
-#### Aufgaben Tag – Code 19: Zeitraum-Info-Box
-- **`gui/aufgaben_tag.py`** – Blaue Info-Box im Zeitraum-Abschnitt
-
-#### Übergabe: Button-Tooltips + Abschluss-Info-Box
-- **`gui/uebergabe.py`** – Tooltips auf Speichern, Abschließen, E-Mail, Löschen
-
-#### Einstellungen: E-Mobby Beschreibung erweitert
-- **`gui/einstellungen.py`** – Erweiterter Text für E-Mobby-GroupBox
-
-### HilfeDialog stark erweitert (v2.9.4)
-- **`gui/hilfe_dialog.py`** – Tab „📦 Module" mit 6–11 Bullet-Points je Modul,  
-  Tab „🔄 Workflow" 8 Schritte, Tab „💡 Tipps & FAQ" 14 Tipps + 5 FAQ,  
-  Neuer Tab „📖 Anleitungen" mit 5 Schritt-für-Schritt-Anleitungen
-
----
-
-## 26.02.2026 – v2.9.3
-
-### HilfeDialog: Animationen
-- Fade+Slide-In, Puls-Icon, Laufbanner, Workflow-Progress-Bar
-
----
-
-## 26.02.2026 – v2.9.1 / v2.9.2
-
-### Tooltips in der gesamten App
-- **`gui/main_window.py`**, **`gui/dashboard.py`**, **`gui/dienstplan.py`**, **`gui/einstellungen.py`**,  
-  **`gui/fahrzeuge.py`**, **`gui/mitarbeiter.py`**, **`gui/aufgaben_tag.py`**, **`gui/sonderaufgaben.py`**, **`gui/uebergabe.py`**
-
-### HilfeDialog (v2.9.2)
-- Neues Fenster mit 4 Tabs: 🏠 Übersicht · 📦 Module · 🔄 Workflow · 💡 Tipps
+| Version | Inhalt |
+|---------|--------|
+| v2.9.4 | Info-Boxen + Tooltips gesamte App, HilfeDialog (Module/Workflow/FAQ/Anleitungen) |
+| v2.9.3 | HilfeDialog Animationen (Fade+Slide-In, Puls, Laufbanner) |
+| v2.9.1/2 | Tooltips alle Module, HilfeDialog 4 Tabs |
 
 ---
 
 ## 26.02.2026 – v2.8
 
-### Dashboard: Animiertes Flugzeug-Widget
-- `_SkyWidget`, `FlugzeugWidget` mit QPainter-Animation
-
-### Code-19-Seite: Alice-im-Wunderland Taschenuhr
-- `_PocketWatchWidget` mit Pendelschwingung, Zifferblatt, römischen Ziffern, Echtzeit-Uhrzeigern
-
-### Code-19-Mail Tab → Aufgaben Nacht
-- `gui/aufgaben.py` – Tab 4 „📋 Code 19 Mail"
-
-### Sonderaufgaben: E-Mobby Fahrer Erkennung
-- `functions/emobby_functions.py` – `get_emobby_fahrer()`, `is_emobby_fahrer()`, `add_emobby_fahrer()`
-
-### Einstellungen: E-Mobby-Fahrer Verwaltung
-- GroupBox mit QListWidget, Hinzufügen/Löschen
+- Dashboard: `_SkyWidget` QPainter-Animation (~33 FPS)
+- Code-19: `_PocketWatchWidget` Taschenuhr mit Echtzeit-Zeigern
+- Aufgaben Nacht: Tab „📋 Code 19 Mail"
+- Sonderaufgaben + Einstellungen: E-Mobby-Fahrerkennung und -Verwaltung
 
 ---
 
-## 25.02.2026
+## 25.02.2026 – v2.7
 
-### Backup ZIP + Restore
-- `backup/backup_manager.py` – `create_zip_backup()`, `list_zip_backups()`, `restore_from_zip()`
-- Ausschlüsse: `build_tmp/`, `Exe/`, `backup/`, `Backup Data/` → Backup: ~8,3 MB
-
-### Krank-Aufschlüsselung nach Tagdienst / Nachtdienst / Sonderdienst
-- `functions/dienstplan_parser.py` – `_ermittle_krank_typ()`, Abschnitts-Tracking, `_detect_abschnitt_header()`
-- `gui/dienstplan.py` – 3 neue Tabellenabschnitte: Krank–Tag / Krank–Nacht / Krank–Sonder
-
-### Statuszeile: Dispo/Betreuer-Trennung
-- Tagdienst + Nachtdienst + Krank getrennt nach Funktion und Schichttyp
+- Backup: `backup_manager.py` – ZIP-Backup/Restore
+- Dienstplan: Krank-Aufschlüsselung (Tag/Nacht/Sonder), Dispo-Abschnitt-Tracking
+- Statuszeile: Betreuer/Dispo-Trennung nach Schichttyp
 
 ---
 
-## Vorherige Versionen
+## Backups
 
-Ältere Änderungen (vor 25.02.2026) sind in den ZIP-Backups dokumentiert.
-
-| Backup | Datum | Größe |
-|---|---|---|
-| `Nesk3_backup_20260302_133256.zip` | 02.03.2026 13:32 | ~8 MB |
+| Datei | Datum | Größe |
+|-------|-------|-------|
+| `Nesk3_backup_20260302_170729.zip` | 02.03.2026 17:07 | ~10 MB |
+| `Nesk3_backup_20260302_151916.zip` | 02.03.2026 15:19 | ~10 MB |
+| `Nesk3_backup_20260302_150415.zip` | 02.03.2026 15:04 | ~10 MB |
+| `Nesk3_backup_20260302_144548.zip` | 02.03.2026 14:45 | ~10 MB |
 | `Nesk3_backup_20260225_222303.zip` | 25.02.2026 22:23 | 8,3 MB |
-| `Nesk3_backup_20260225_205927.zip` | 25.02.2026 20:59 | 8,3 MB |

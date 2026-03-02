@@ -1,8 +1,8 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 02.03.2026 – v3.0.0  
-**Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn  
-**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Mitarbeiter-Dokumente
+**Stand:** 02.03.2026 – v3.1.1
+**Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn
+**Zweck:** Dienstplan, Stärkemeldung, Mitarbeiterverwaltung, Mitarbeiter-Dokumente, Stellungnahmen-DB
 
 ---
 
@@ -11,12 +11,11 @@
 1. [Projektstruktur](#1-projektstruktur)
 2. [Backup-System](#2-backup-system)
 3. [Dienstplan-Parser](#3-dienstplan-parser)
-4. [Dienstplan-Anzeige (GUI)](#4-dienstplan-anzeige-gui)
-5. [Krankmeldungs-Logik](#5-krankmeldungs-logik)
-6. [Dienst-Definitionen](#6-dienst-definitionen)
-7. [Mitarbeiter-Dokumente](#7-mitarbeiter-dokumente)
+4. [Mitarbeiter-Dokumente](#4-mitarbeiter-dokumente)
+5. [Stellungnahmen-System](#5-stellungnahmen-system)
+6. [Lokale Web-Ansicht](#6-lokale-web-ansicht)
+7. [Übergabe & E-Mail](#7-übergabe--e-mail)
 8. [Bekannte Sonderfälle](#8-bekannte-sonderfälle)
-9. [Änderungshistorie](#9-änderungshistorie)
 
 ---
 
@@ -24,213 +23,222 @@
 
 ```
 Nesk3/
-├── main.py                              # Einstiegspunkt – startet die PySide6-App
-├── config.py                            # Globale Konstanten (Farben, Pfade, DB-Name)
-│
+├── main.py
+├── config.py
 ├── gui/
-│   ├── main_window.py                   # Hauptfenster, Sidebar-Navigation (12 Einträge)
-│   ├── dashboard.py                     # Dashboard (Statistik-Karten, Flugzeug-Animation)
-│   ├── mitarbeiter_dokumente.py         # NEU: Mitarbeiter-Dokumente Widget
-│   ├── dienstplan.py                    # Dienstplan-Tab (Excel-Import, Tabelle, Export)
-│   ├── aufgaben.py                      # Aufgaben Nacht (4 Tabs inkl. Code-19-Mail)
-│   ├── aufgaben_tag.py                  # Aufgaben Tag (Code19Mail, FreieMail, Checklisten)
-│   ├── sonderaufgaben.py                # Sonderaufgaben (Bulmor, E-Mobby, Dienstplan-Abgleich)
-│   ├── uebergabe.py                     # Übergabe-Protokoll
-│   ├── fahrzeuge.py                     # Fahrzeugverwaltung (Status, Schäden, Termine)
-│   ├── code19.py                        # Code-19 (Taschenuhr-Animation, Protokoll)
-│   ├── mitarbeiter.py                   # Mitarbeiter-Verwaltung (Stammdaten, Export)
-│   ├── einstellungen.py                 # Einstellungen (Pfade, E-Mobby-Fahrerverwaltung)
-│   └── checklisten.py                   # Checklisten-Tab
-│
+│   ├── main_window.py               # Hauptfenster, 12 Nav-Einträge
+│   ├── mitarbeiter_dokumente.py     # Mitarbeiter-Dokumente + Stellungnahmen + DB-Browser
+│   ├── uebergabe.py                 # Übergabe + E-Mail (inkl. Stellungnahmen-Link)
+│   └── ...
 ├── functions/
-│   ├── dienstplan_parser.py             # Excel-Parser (Kernlogik, Krank-Typen, Dispo-Abschnitt)
-│   ├── dienstplan_functions.py          # DB-Funktionen für Dienstplan
-│   ├── emobby_functions.py              # E-Mobby-Fahrerliste (TXT↔DB-Sync, Matching)
-│   ├── fahrzeug_functions.py            # DB-Funktionen für Fahrzeuge + Status-Verlauf
-│   ├── mail_functions.py                # Outlook-COM-Integration
-│   ├── mitarbeiter_functions.py         # DB-Funktionen für Mitarbeiter
-│   ├── mitarbeiter_dokumente_functions.py  # NEU: Word-Dokument-Erstellung mit Vorlage
-│   ├── settings_functions.py            # Key-Value-Einstellungen (get/set)
-│   ├── staerkemeldung_export.py         # Word-Export Stärkemeldung (Dispo-Zeiten runden)
-│   └── uebergabe_functions.py           # DB-Funktionen für Übergabe-Protokolle
-│
-├── database/
-│   ├── connection.py                    # SQLite-Verbindung, db_cursor context manager
-│   ├── models.py                        # ORM-Modelle
-│   └── migrations.py                    # DB-Migrationen (beim Start ausgeführt)
-│
-├── backup/
-│   └── backup_manager.py                # JSON + ZIP Backup/Restore
-│
-├── Daten/
-│   ├── Mitarbeiter Vorlagen/
-│   │   └── Kopf und Fußzeile/
-│   │       └── Stärkemeldung 31.01.2026 bis 01.02.2026.docx  ← DRK-Vorlage
-│   └── Mitarbeiterdokumente/
-│       ├── Stellungnahmen/
-│       ├── Bescheinigungen/
-│       ├── Dienstanweisungen/
-│       ├── Abmahnungen/
-│       ├── Lob & Anerkennung/
-│       └── Sonstiges/
+│   ├── mitarbeiter_dokumente_functions.py  # Word-Erstellung, STELLUNGNAHMEN_EXTERN_PFAD
+│   ├── stellungnahmen_db.py                # SQLite-Datenbank für Stellungnahmen
+│   ├── stellungnahmen_html_export.py       # HTML-Generator für Web-Ansicht
+│   └── ...
+├── WebNesk/
+│   ├── stellungnahmen_lokal.html    # Lokale Web-Ansicht (kein Server nötig)
+│   └── ...
+└── Daten/
+    └── Mitarbeiterdokumente/
+        ├── Stellungnahmen/
+        ├── Datenbank/
+        │   └── stellungnahmen.db
+        └── ...
 ```
 
 ---
 
 ## 2. Backup-System
 
-### `backup/backup_manager.py`
-
-- `create_zip_backup()`: Erstellt ZIP unter `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
-- `list_zip_backups()`: Listet alle ZIP-Backups auf
-- `restore_from_zip(zip_path)`: Stellt Dateien wieder her
-
-**Ausschlüsse:** `__pycache__`, `.git`, `Backup Data`, `backup`, `build_tmp`, `Exe`  
-**Backup-Größe:** ~8–10 MB
+- `create_zip_backup()` → `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
+- Ausschlüsse: `__pycache__`, `.git`, `Backup Data`, `backup`, `build_tmp`, `Exe`
+- Größe: ~8–12 MB
 
 ---
 
 ## 3. Dienstplan-Parser
 
-### `functions/dienstplan_parser.py` – `DienstplanParser`
+### `functions/dienstplan_parser.py`
 
-**Konstruktor:** `DienstplanParser(excel_path, alle_anzeigen=False, round_dispo=True)`
+- `round_dispo=True` (Standard): Zeiten auf volle Stunden runden
+- `round_dispo=False`: Rohdaten (Vergleichs-Popup)
+- `_ermittle_krank_typ()`: Tag/Nacht/Sonder nach Von–Bis-Zeiten
 
-- `round_dispo=True` (Standard): Dispo-Zeiten werden auf volle Stunden gerundet
-- `round_dispo=False`: Rohdaten ohne Runden (für Vergleichsdarstellung im Popup)
-
-**Hauptmethode `parse()`:**
-1. Liest Excel-Spalten mit `openpyxl`
-2. Erkennt Abschnitts-Header (Dispo/Betreuer) via `_detect_abschnitt_header()`
-3. Extrahiert für jede Person: `name`, `kuerzel`, `von`, `bis`, `ist_dispo`, `ist_krank`, ...
-4. Klassifiziert Krank-Schichten: `_ermittle_krank_typ(start_zeit, end_zeit, name)`
-5. Rundet Dispo-Zeiten: `_runde_auf_volle_stunde(zeit_str)`
-
-**Hilfsmethoden:**
-- `_detect_abschnitt_header(row)` → `'dispo'` / `'betreuer'` / `None`
-- `_ermittle_krank_typ(start, end, name)` → `krank_schicht_typ`, `krank_ist_dispo`, `krank_abgeleiteter_dienst`
-- `_runde_auf_volle_stunde(zeit_str)` → `'07:15'` → `'07:00'`
-- `_betr_zu_dispo_kuerzel(kuerzel)` → `N→DN`, `T→DT`
+| Von–Bis | Typ |
+|---------|-----|
+| 06:00–18:00 | Tagdienst (T) |
+| 07:00–19:00 | Tagdienst Dispo (DT) |
+| 18:00–06:00 | Nachtdienst (N) |
+| 19:00–07:00 | Nachtdienst Dispo (DN) |
+| Andere | Sonderdienst (S) |
 
 ---
 
-## 4. Dienstplan-Anzeige (GUI)
-
-### `gui/dienstplan.py` – `DienstplanWidget`
-
-- **Excel laden**: Dateidialog oder gespeicherter Pfad
-- **Statuszeile**: Tagdienst/Nachtdienst/Krank nach Betreuer/Dispo/Schichttyp getrennt
-- **Word-Export**: `_DispoZeitenVorschauDialog` – Popup zeigt Excel-Originalzeiten vs. Export-Zeiten
-  - Manuell bearbeitbare Zeiten: `manuell_geaendert`-Flag verhindert automatisches Runden
-- **Dispo-Zeiten-Runden**: Nur wenn `manuell_geaendert` NICHT gesetzt (in `staerkemeldung_export.py`)
-
----
-
-## 5. Krankmeldungs-Logik
-
-### Klassifizierung
-
-| Von–Bis | Typ | Kürzel |
-|---------|-----|--------|
-| 06:00–18:00 | Tagdienst | T |
-| 07:00–19:00 | Tagdienst Dispo | DT |
-| 18:00–06:00 | Nachtdienst | N |
-| 19:00–07:00 | Nachtdienst Dispo | DN |
-| Andere | Sonderdienst | S |
-
-Kranke Disponenten (aus Dispo-Abschnitt): Kürzel wird durch `_betr_zu_dispo_kuerzel()` angepasst.
-
----
-
-## 6. Dienst-Definitionen
-
-```python
-_TAG_DIENSTE    = {"T", "DT", "T8", "T10", "FT", "BT"}
-_NACHT_DIENSTE  = {"N", "DN", "N10", "FN", "BN"}
-_SONDER_DIENSTE = {"S", "DS", "FS"}
-```
-
----
-
-## 7. Mitarbeiter-Dokumente
-
-### Überblick
-
-Neuer Bereich ab v3.0.0. Ermöglicht das Erstellen, Öffnen und Bearbeiten von  
-Mitarbeiter-bezogenen Dokumenten mit einheitlicher DRK-Kopf-/Fußzeile.
+## 4. Mitarbeiter-Dokumente
 
 ### Vorlage
+`Daten/Mitarbeiter Vorlagen/Kopf und Fußzeile/Stärkemeldung 31.01.2026 bis 01.02.2026.docx`
 
-**Pfad:**
+### Dateitabelle
+
+Die Tabelle im Tab „📂 Dateien" passt ihre Spalten je nach Kategorie an:
+
+- **Alle Kategorien:** `Dateiname | Zuletzt geändert | Typ`
+- **Stellungnahmen:** `Dateiname | Art | Mitarbeiter | Zuletzt geändert | Typ`
+
+Art und Mitarbeiter werden via `db_lade_alle()` geladen und per Dateiname zugeordnet (`os.path.basename(pfad_intern)`). Dateien ohne DB-Eintrag zeigen `—`.
+
+### Rechtsklick-Menü
+
+Rechtsklick auf eine Zeile der Dateitabelle bietet:
+1. 📂 Im Explorer anzeigen
+2. 📄 Öffnen
+3. *(Separator)*
+4. ✏ Bearbeiten
+5. 🔤 Umbenennen
+6. 🗑 Löschen
+
+Die Zeile wird vor dem Öffnen des Menüs automatisch selektiert.
+
+---
+
+
+| Bescheinigungen | Standard-Dokument |
+| Dienstanweisungen | Standard-Dokument |
+| Abmahnungen | Standard-Dokument |
+| Lob & Anerkennung | Standard-Dokument |
+| Sonstiges | Standard-Dokument |
+
+### `erstelle_dokument_aus_vorlage()`
+1. Vorlage laden (Kopf-/Fußzeile)
+2. Body leeren
+3. Titel (fett 16pt zentriert), Meta-Block, Inhalt, Unterschrift einfügen
+4. Speichern unter `Daten/Mitarbeiterdokumente/{kategorie}/{dateiname}`
+
+---
+
+## 5. Stellungnahmen-System
+
+### `_StellungnahmeDialog` – Felder je Typ
+
+#### Allgemein (immer sichtbar)
+- Mitarbeiter (Pflicht), Datum des Vorfalls, Verfasst am
+- Art der Stellungnahme (Radio: Flug / Beschwerde / Nicht mitgeflogen)
+
+#### Flug-bezogener Vorfall
+- Flugnummer (Pflicht)
+- Verspätung? CB → Onblock-Zeit, Offblock-Zeit
+- Flugrichtung: Inbound / Outbound / Beides
+- Inbound (wenn Inbound/Beides): Ankunft LFZ, Auftragsende
+- Outbound (wenn Outbound/Beides): Paxannahme-Zeit, Ort (C72/Meetingpoint/Sonstiges)
+- Sachverhalt (Pflicht)
+
+#### Passagierbeschwerde
+- Onblock-Zeit, Offblock-Zeit (immer sichtbar bei diesem Typ)
+- Sachverhalt (Pflicht)
+- Beschwerdetext
+
+#### Nicht mitgeflogen (kein PRM)
+- Flugnummer (Pflicht)
+- Sachverhalt (Pflicht)
+
+### Speicherpfade
+
+| Pfad | Beschreibung |
+|------|-------------|
+| `Daten/Mitarbeiterdokumente/Stellungnahmen/` | Intern (App-Zugriff) |
+| `...\97_Stellungnahmen\` | Extern (OneDrive-Ablage, Team-Zugriff) |
+
+### Datenbankschema (`stellungnahmen.db`)
+
+```sql
+CREATE TABLE stellungnahmen (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    erstellt_am     TEXT,    -- ISO-Zeitstempel
+    datum_vorfall   TEXT,    -- dd.MM.yyyy
+    verfasst_am     TEXT,    -- dd.MM.yyyy
+    mitarbeiter     TEXT,
+    art             TEXT,    -- flug|beschwerde|nicht_mitgeflogen
+    flugnummer      TEXT,
+    verspaetung     INTEGER, -- 0/1
+    onblock         TEXT,    -- HH:mm
+    offblock        TEXT,    -- HH:mm
+    richtung        TEXT,    -- inbound|outbound|beides
+    ankunft_lfz     TEXT,    -- HH:mm
+    auftragsende    TEXT,    -- HH:mm
+    paxannahme_zeit TEXT,    -- HH:mm
+    paxannahme_ort  TEXT,
+    sachverhalt     TEXT,
+    beschwerde_text TEXT,
+    pfad_intern     TEXT,    -- vollständiger Dateipfad
+    pfad_extern     TEXT
+);
 ```
-Daten/Mitarbeiter Vorlagen/Kopf und Fußzeile/Stärkemeldung 31.01.2026 bis 01.02.2026.docx
-```
 
-Diese Datei enthält die DRK-konforme Kopf- und Fußzeile. Beim Erstellen neuer Dokumente  
-wird diese Vorlage geladen, der Textkörper geleert und mit dem neuen Inhalt befüllt.
-
-### Dokument-Kategorien
-
-| Kategorie | Zweck |
-|-----------|-------|
-| Stellungnahmen | MA-Berichte zu Vorfällen, Ereignissen |
-| Bescheinigungen | Dienstbescheinigungen, Anwesenheitsnachweise |
-| Dienstanweisungen | Interne Anweisungen, Protokoll-Ergänzungen |
-| Abmahnungen | Formelle Abmahnungen |
-| Lob & Anerkennung | Belobigungen, Danksagungen |
-| Sonstiges | Alle weiteren Dokumente |
-
-### Dokument-Erstellung (`erstelle_dokument_aus_vorlage`)
+### `lade_alle()` Abfrage-Parameter
 
 ```python
-erstelle_dokument_aus_vorlage(
-    kategorie,   # z.B. "Stellungnahmen"
-    titel,       # Dokument-Titel (fett, 16pt, zentriert)
-    mitarbeiter, # Vor- und Nachname
-    datum,       # dd.MM.yyyy
-    inhalt,      # Freitext, Zeilenumbrüche werden als Absätze eingefügt
-    dateiname,   # Optional – auto-generiert wenn leer
+lade_alle(
+    monat=None,    # 1–12
+    jahr=None,     # int
+    art=None,      # "flug" | "beschwerde" | "nicht_mitgeflogen"
+    suchtext=None, # Suche in Mitarbeiter, Flugnummer, Sachverhalt
 )
 ```
+Ergebnis: Liste von dicts, neueste zuerst.
 
-Ablauf:
-1. `Document(VORLAGE_PFAD)` – öffnet Vorlage mit Kopf-/Fußzeile
-2. Entfernt alle bestehenden Body-Absätze und Tabellen
-3. Fügt Titel, Meta-Block (Mitarbeiter, Datum), Inhalt und Unterschriftsblock ein
-4. Speichert unter `Daten/Mitarbeiterdokumente/{kategorie}/{dateiname}`
+---
 
-### Dokument bearbeiten (`_DokumentBearbeitenDialog`)
+## 6. Lokale Web-Ansicht
 
-- `.docx`: Absätze werden per `python-docx` ausgelesen und als editierbarer Text angezeigt
-- `.txt`: Rohtext wird geladen
-- Nach Bestätigung: Datei wird mit neuem Inhalt über Vorlage neu erstellt (gleicher Dateiname)
+### `WebNesk/stellungnahmen_lokal.html`
+
+Vollständig statische HTML-Datei, alle Daten eingebettet als JavaScript-Variable.
+Läuft per `file://` ohne Web-Server.
+
+**Generierung:** `functions/stellungnahmen_html_export.py`
+- Wird automatisch nach jeder Stellungnahme-Erstellung/-Löschung aufgerufen
+- Kann manuell mit `generiere_html()` aufgerufen werden
+
+**Features:**
+- Live-Suche (Name, Flugnummer, Sachverhalt)
+- Filter: Jahr, Monat, Art
+- Detailansicht: alle Felder aller Typen
+- Word-Dokument: Pfad anzeigen + In Zwischenablage kopieren
+- URL-Hash: `file:///...stellungnahmen_lokal.html#id-42` → direkt zu Datensatz 42
+
+**Integration:**
+- App-Button „🌐 Web-Ansicht" (erscheint bei Kategorie Stellungnahmen)
+- Übergabe-E-Mail: optionaler Link `file:///...html` oder `...html#id-42`
+
+---
+
+## 7. Übergabe & E-Mail
+
+### `gui/uebergabe.py` – `_email_erstellen()`
+
+Bestehende Sektionen: Protokolldaten, Fahrzeugstatus, Fahrzeugschäden, Handys/Geräte
+
+**Neue Sektion: Stellungnahmen-Link**
+- Checkbox „Stellungnahmen-Link anhängen"
+- ComboBox: Allgemeiner Link / Spezifischer Fall (Liste der letzten 30 Tage)
+- Einfügt im Mail-Körper:
+  ```
+  Stellungnahmen-Datenbank:
+  [Link zur lokalen Web-Ansicht]
+  Referenz: Stellungnahme #42 – Max Mustermann – 02.03.2026
+  ```
 
 ---
 
 ## 8. Bekannte Sonderfälle
 
 ### CareMan-Exportfehler
-- Disponenten können Minutenabweichungen haben (`07:15`, `19:45`) → `_runde_auf_volle_stunde()`
-- Lytek-Fall: Im Dispo-Abschnitt stehend, aber Kürzel `Krank` → `ist_dispo=True` durch Abschnitts-Tracking
+- Dispo-Zeiten mit Minuten (07:15, 19:45) → `_runde_auf_volle_stunde()`
 
 ### `manuell_geaendert`-Flag
-- Gesetzt in `_DispoZeitenVorschauDialog._edit_row()` wenn User eine Zeit manuell ändert
+- Gesetzt in `_DispoZeitenVorschauDialog` bei manueller Zeitänderung
 - Verhindert erneutes Runden in `staerkemeldung_export._add_dienst_gruppe()`
 
 ### Windows Long Path Limit
-- `.venv` kann bei sehr langen Pfaden keine PySide6-Installation durchführen
-- Workaround: System-Python direkt in `.vscode/settings.json` konfigurieren
-
----
-
-## 9. Änderungshistorie
-
-| Version | Datum | Änderung |
-|---------|-------|----------|
-| v3.0.0 | 02.03.2026 | Mitarbeiter-Dokumente Widget + nav | 
-| v2.9.4 | 26.02.2026 | Info-Boxen, Tooltips, HilfeDialog erweitert |
-| v2.9.3 | 26.02.2026 | HilfeDialog Animationen |
-| v2.9.2 | 26.02.2026 | HilfeDialog 4 Tabs |
-| v2.9.1 | 26.02.2026 | Tooltips gesamte App |
-| v2.8   | 26.02.2026 | Dashboard-Animation, Code-19-Taschenuhr, E-Mobby |
-| v2.7   | 25.02.2026 | Backup ZIP, Krank-Aufschlüsselung, Dispo-Abschnitt |
+- System-Python direkt nutzen; in `.vscode/settings.json` konfigurieren
