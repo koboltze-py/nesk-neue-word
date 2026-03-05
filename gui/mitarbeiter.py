@@ -44,6 +44,26 @@ class _ImportWorker(QThread):
             self.fehler.emit(str(e))
 
 
+# ── Lade-Worker ────────────────────────────────────────────────────────────────
+
+class _LoadWorker(QThread):
+    """Lädt Mitarbeiterdaten + Ausschluss-Set im Hintergrund-Thread."""
+    fertig = Signal(list, set)   # (mitarbeiter_liste, ausgeschlossene_namen_set)
+
+    def run(self):
+        try:
+            from functions.mitarbeiter_functions import get_alle_mitarbeiter
+            from functions.settings_functions import get_ausgeschlossene_namen
+            mitarbeiter = get_alle_mitarbeiter()
+            try:
+                ausgeschlossen = set(get_ausgeschlossene_namen())
+            except Exception:
+                ausgeschlossen = set()
+            self.fertig.emit(mitarbeiter, ausgeschlossen)
+        except Exception:
+            self.fertig.emit([], set())
+
+
 # ── Mitarbeiter-Dialog ─────────────────────────────────────────────────────────
 
 class MitarbeiterDialog(QDialog):
@@ -175,6 +195,8 @@ class MitarbeiterWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._alle: list[Mitarbeiter] = []
+        self._ausgeschlossen_set: set = set()
+        self._load_worker: _LoadWorker | None = None
         self._build_ui()
         # refresh() wird von MitarbeiterHauptWidget.refresh() aufgerufen
 
@@ -300,12 +322,19 @@ class MitarbeiterWidget(QWidget):
     # ── Daten laden ────────────────────────────────────────────────────────────
 
     def refresh(self):
-        """Lädt alle Mitarbeiter aus der DB."""
-        try:
-            from functions.mitarbeiter_functions import get_alle_mitarbeiter
-            self._alle = get_alle_mitarbeiter()
-        except Exception as e:
-            self._alle = []
+        """Startet asynchrones Laden der Mitarbeiter aus der DB."""
+        # Laufenden Worker abbrechen
+        if self._load_worker and self._load_worker.isRunning():
+            self._load_worker.quit()
+            self._load_worker.wait()
+        self._load_worker = _LoadWorker(self)
+        self._load_worker.fertig.connect(self._on_data_geladen)
+        self._load_worker.start()
+
+    def _on_data_geladen(self, mitarbeiter: list, ausgeschlossen: set):
+        """Callback wenn Worker fertig — läuft im Hauptthread."""
+        self._alle = mitarbeiter
+        self._ausgeschlossen_set = ausgeschlossen
         self._anwenden_filter()
 
     def _anwenden_filter(self):
@@ -333,12 +362,9 @@ class MitarbeiterWidget(QWidget):
     # ── Tabelle rendern ────────────────────────────────────────────────────────
 
     def _render_table(self, mitarbeiter: list[Mitarbeiter]):
-        try:
-            from functions.settings_functions import get_ausgeschlossene_namen
-            ausgeschlossen_set = set(get_ausgeschlossene_namen())
-        except Exception:
-            ausgeschlossen_set = set()
+        ausgeschlossen_set = self._ausgeschlossen_set
 
+        self._table.setUpdatesEnabled(False)
         self._table.setRowCount(len(mitarbeiter))
         for row, m in enumerate(mitarbeiter):
             vollname_low = f"{m.vorname} {m.nachname}".lower().strip()
@@ -377,6 +403,8 @@ class MitarbeiterWidget(QWidget):
                     item.setForeground(QColor("#bb0000"))
 
                 self._table.setItem(row, col, item)
+
+        self._table.setUpdatesEnabled(True)
 
         self._row_count_lbl.setText(
             f"{len(mitarbeiter)} Einträge  "
