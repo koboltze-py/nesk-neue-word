@@ -323,10 +323,21 @@ class MitarbeiterWidget(QWidget):
 
     def refresh(self):
         """Startet asynchrones Laden der Mitarbeiter aus der DB."""
-        # Laufenden Worker abbrechen
+        # Laufenden Worker aufgeben (NICHT warten — würde Hauptthread blockieren)
         if self._load_worker and self._load_worker.isRunning():
+            try:
+                self._load_worker.fertig.disconnect()
+            except RuntimeError:
+                pass
             self._load_worker.quit()
-            self._load_worker.wait()
+            # kein wait() — Worker läuft still im Hintergrund zu Ende
+
+        # Gecachte Daten sofort anzeigen (falls vorhanden)
+        if self._alle:
+            self._anwenden_filter()
+        else:
+            self._row_count_lbl.setText("⏳ Lade…")
+
         self._load_worker = _LoadWorker(self)
         self._load_worker.fertig.connect(self._on_data_geladen)
         self._load_worker.start()

@@ -20,7 +20,7 @@ def _row_factory(cursor: sqlite3.Cursor, row: tuple) -> dict:
 
 def get_connection() -> sqlite3.Connection:
     """Gibt eine neue SQLite-Verbindung zurück (WAL-Modus, dict-Zeilen)."""
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=3, check_same_thread=False)
     conn.row_factory = _row_factory
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -112,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_ma_funktion ON mitarbeiter(funktion);
 
 def get_ma_connection() -> sqlite3.Connection:
     """Gibt eine Verbindung zur Mitarbeiter-Datenbank zurück."""
-    conn = sqlite3.connect(MITARBEITER_DB_PATH, timeout=10)
+    conn = sqlite3.connect(MITARBEITER_DB_PATH, timeout=3, check_same_thread=False)
     conn.row_factory = _row_factory
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
