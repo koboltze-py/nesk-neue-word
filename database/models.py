@@ -14,6 +14,7 @@ class Mitarbeiter:
     vorname:        str            = ""
     nachname:       str            = ""
     personalnummer: str            = ""
+    funktion:       str            = "stamm"      # stamm | dispo
     position:       str            = ""
     abteilung:      str            = ""
     email:          str            = ""

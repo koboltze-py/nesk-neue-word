@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS mitarbeiter (
     vorname         TEXT NOT NULL,
     nachname        TEXT NOT NULL,
     personalnummer  TEXT UNIQUE,
+    funktion        TEXT DEFAULT 'stamm'
+                    CHECK (funktion IN ('stamm','dispo')),
     position        TEXT DEFAULT '',
     abteilung       TEXT DEFAULT '',
     email           TEXT DEFAULT '',
@@ -197,6 +199,12 @@ def run_migrations():
             "INSERT OR IGNORE INTO settings (schluessel, wert) VALUES (?, ?)",
             ('dienstplan_ordner', _default_ordner)
         )
+
+        # Neue Spalten für mitarbeiter nachrüsten
+        try:
+            cur.execute("ALTER TABLE mitarbeiter ADD COLUMN funktion TEXT DEFAULT 'stamm'")
+        except Exception:
+            pass  # Spalte existiert bereits
 
         # Neue Spalten für uebergabe_protokolle nachrüsten (SQLite ALTER TABLE)
         for col, defn in [
