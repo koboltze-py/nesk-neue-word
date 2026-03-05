@@ -129,6 +129,22 @@ def lade_verspaetungen(
         return [dict(r) for r in rows]
 
 
+def lade_verspaetungen_fuer_datum(datum_yyyymmdd: str) -> list[dict]:
+    """Alle Verspätungen für einen bestimmten Tag zurückgeben (Format: yyyy-MM-dd)."""
+    _init_db()
+    try:
+        teile = datum_yyyymmdd.split("-")
+        datum_filter = f"{teile[2]}.{teile[1]}.{teile[0]}"
+    except Exception:
+        return []
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM verspaetungen WHERE datum = ? ORDER BY erstellt_am DESC",
+            (datum_filter,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def verfuegbare_jahre() -> list[int]:
     """Liste aller Jahre mit Einträgen zurückgeben."""
     _init_db()

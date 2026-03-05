@@ -36,6 +36,7 @@ from functions.fahrzeug_functions import (
     lade_schaeden_letzte_tage,
     markiere_schaden_gesendet,
 )
+from functions.verspaetung_db import lade_verspaetungen_fuer_datum as lade_vsp_aus_db
 
 # ── Farben ──────────────────────────────────────────────────────────────────
 _TAG_COLOR    = "#e67e22"   # Orange für Tagdienst
@@ -921,7 +922,28 @@ class UebergabeWidget(QWidget):
                 item.widget().deleteLater()
         self._verspaetungen_widgets.clear()
 
+        # Read-only: Einträge aus verspaetungen.db für diesen Tag
+        datum_iso = self._f_datum.date().toString("yyyy-MM-dd")
+        db_eintraege: list = []
+        try:
+            db_eintraege = lade_vsp_aus_db(datum_iso)
+        except Exception:
+            pass
+
+        # Manuelle Einträge aus uebergabe_verspaetungen
         eintraege = lade_verspaetungen(protokoll_id) if protokoll_id else []
+
+        # Schreibgeschützte MA-Doku-Einträge anzeigen
+        if db_eintraege:
+            hdr = QLabel("📋 Aus Mitarbeiter-Dokumente (schreibgeschützt):")
+            hdr.setStyleSheet(
+                "color:#1a6b8a;font-size:10px;font-weight:bold;border:none;"
+            )
+            self._verspaetungen_section_layout.addWidget(hdr)
+            for e in db_eintraege:
+                self._add_verspaetung_db_row(e)
+
+        # Manuelle Einträge anzeigen
         if eintraege:
             for e in eintraege:
                 name = e["mitarbeiter"] if isinstance(e, dict) else e[0]
@@ -929,7 +951,7 @@ class UebergabeWidget(QWidget):
                 ist  = e["ist_zeit"]    if isinstance(e, dict) else e[2]
                 self._add_verspaetung_row(name=name, soll_zeit=soll, ist_zeit=ist,
                                           _skip_hint_remove=True)
-        else:
+        elif not db_eintraege:
             hint = QLabel("✅ Keine Verspätungen eingetragen – ➕ hinzufügen")
             hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
             self._verspaetungen_section_layout.addWidget(hint)
@@ -1006,6 +1028,39 @@ class UebergabeWidget(QWidget):
                 self._verspaetungen_section_layout.addWidget(hint)
 
         del_btn.clicked.connect(_remove)
+        self._verspaetungen_section_layout.addWidget(row_frame)
+
+    def _add_verspaetung_db_row(self, e: dict):
+        """Zeigt eine Verspätung aus der MA-Doku als schreibgeschützte Zeile an."""
+        row_frame = QFrame()
+        row_frame.setStyleSheet(
+            "QFrame{background:#e8f4f9;border:1px solid #90cbe0;border-radius:4px;}"
+        )
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 4, 6, 4)
+        row_layout.setSpacing(8)
+
+        name     = e.get("mitarbeiter", "")
+        soll     = e.get("dienstbeginn", "")
+        ist      = e.get("dienstantritt", "")
+        min_vsp  = e.get("verspaetung_min", "")
+        dienst   = e.get("dienst", "")
+
+        name_lbl = QLabel(f"👤 {name}")
+        name_lbl.setStyleSheet("border:none;font-size:11px;font-weight:bold;")
+        diff_txt  = f"  (+{min_vsp} Min.)" if min_vsp else ""
+        info_lbl  = QLabel(f"Dienst: {dienst}  Soll: {soll}  Ist: {ist}{diff_txt}")
+        info_lbl.setStyleSheet("border:none;font-size:10px;color:#1a5b78;")
+        src_lbl   = QLabel("📋 MA-Doku")
+        src_lbl.setStyleSheet(
+            "border:none;font-size:9px;color:#fff;background:#1a8ab5;"
+            "border-radius:3px;padding:1px 5px;"
+        )
+
+        row_layout.addWidget(name_lbl)
+        row_layout.addWidget(info_lbl)
+        row_layout.addStretch()
+        row_layout.addWidget(src_lbl)
         self._verspaetungen_section_layout.addWidget(row_frame)
 
     # ── Fahrzeug-Sektion dynamisch aufbauen ────────────────────────────────────
@@ -1308,19 +1363,32 @@ class UebergabeWidget(QWidget):
             alle_vsp = lade_verspaetungen(pid) if pid else []
         except Exception:
             alle_vsp = []
+        # Auch Einträge aus verspaetungen.db (MA-Doku) für diesen Tag hinzufügen
+        try:
+            _datum_iso = self._f_datum.date().toString("yyyy-MM-dd")
+            alle_vsp = lade_vsp_aus_db(_datum_iso) + alle_vsp
+        except Exception:
+            pass
 
         def _vsp_label(e):
             _name = e["mitarbeiter"] if isinstance(e, dict) else e[0]
-            _soll = e["soll_zeit"]   if isinstance(e, dict) else e[1]
-            _ist  = e["ist_zeit"]    if isinstance(e, dict) else e[2]
-            _diff = ""
-            try:
-                from datetime import datetime as _dt
-                _delta = int((_dt.strptime(_ist, "%H:%M") - _dt.strptime(_soll, "%H:%M")).total_seconds() // 60)
-                if _delta > 0:
-                    _diff = f"  (+{_delta} Min.)"
-            except Exception:
-                pass
+            if isinstance(e, dict) and "dienstbeginn" in e:
+                # Eintrag aus verspaetungen.db (MA-Doku)
+                _soll = e.get("dienstbeginn", "")
+                _ist  = e.get("dienstantritt", "")
+                _min_v = e.get("verspaetung_min")
+                _diff = f"  (+{_min_v} Min.)" if _min_v else ""
+            else:
+                _soll = e["soll_zeit"] if isinstance(e, dict) else e[1]
+                _ist  = e["ist_zeit"]  if isinstance(e, dict) else e[2]
+                _diff = ""
+                try:
+                    from datetime import datetime as _dt
+                    _delta = int((_dt.strptime(_ist, "%H:%M") - _dt.strptime(_soll, "%H:%M")).total_seconds() // 60)
+                    if _delta > 0:
+                        _diff = f"  (+{_delta} Min.)"
+                except Exception:
+                    pass
             return _name, _soll, _ist, _diff
 
         vsp_frame = QFrame()
@@ -1375,7 +1443,7 @@ class UebergabeWidget(QWidget):
                     _it.widget().deleteLater()
             _vsp_checkboxes.clear()
             if not alle_vsp:
-                _nl = QLabel("Keine Verspätungen im Protokoll erfasst.")
+                _nl = QLabel("Keine Verspätungen erfasst.")
                 _nl.setStyleSheet("color:#aaa;font-size:10px;border:none;padding:4px;")
                 vsp_inner_vl.addWidget(_nl)
                 return
@@ -1393,7 +1461,8 @@ class UebergabeWidget(QWidget):
                     if not (t_von <= t_ist_v <= t_bis):
                         continue
                 from PySide6.QtWidgets import QCheckBox as _QCB
-                _cb = _QCB(f"🕐 {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}")
+                _src_tag = "  📋" if (isinstance(_e, dict) and "dienstbeginn" in _e) else ""
+                _cb = _QCB(f"🕐 {_n}  –  Gefordert: {_s}  Tatsächlich: {_i}{_d}{_src_tag}")
                 _cb.setChecked(True)
                 _cb.setStyleSheet("font-size:10px;")
                 vsp_inner_vl.addWidget(_cb)
