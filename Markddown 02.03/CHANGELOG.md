@@ -4,6 +4,102 @@ Alle Änderungen in chronologischer Reihenfolge.
 
 ---
 
+## 11.03.2026 – v3.4.1
+
+### Hilfe-Dialog: Live-Screenshot-Galerie + Benutzeranleitung
+
+#### `gui/hilfe_dialog.py`
+- **Neuer Tab "📸 Vorschau"**: 2-spaltige Kachelgalerie aller 14 App-Seiten
+- **`_ScreenshotCard`**: Kachel mit Thumbnail (430×210 px), Hover-Highlight, Klick öffnet Vollbild
+- **`_FullscreenPreview`**: modaler Vollbild-Dialog (maximierbar, dunkler Hintergrund)
+- **Schaltfläche „Screenshots erstellen“**: durchläuft alle Seiten mit 300 ms/Seite, Fortschrittsanzeige
+- Screenshots gespeichert in `Daten/Hilfe/screenshots/{idx:02d}.png`
+- Platzhalter-Kacheln (Emoji) solange kein Bild vorhanden
+- Status-Label: Anzahl vorhandener Screenshots + Speicherort
+
+#### `gui/main_window.py`
+- **`grab_all_screenshots(callback=None)`**: navigiert timer-basiert alle 14 Seiten durch, speichert `QStackedWidget.grab()` als PNG
+
+#### `docs/BENUTZERANLEITUNG.md` _(neu)_
+- Vollständige deutschsprachige Benutzeranleitung (17 Abschnitte)
+- ASCII-UI-Mockups, Mermaid-Ablaufdiagramme, Tabellen
+- Alle 14 Navigationsbereiche dokumentiert
+
+---
+
+## 11.03.2026 – v3.4.0
+
+### Medikamentengabe als Tabelle, Sonderaufgaben-Erweiterungen, Dienstplan-Verbesserungen
+
+#### `gui/dienstliches.py`
+- **Medikamentengabe** komplett neu als Tabelle:
+  - Neue DB-Tabelle `medikamente (id, patienten_id, medikament, dosis, applikation)` mit CASCADE-FK
+  - Neue Funktion `lade_medikamente(patienten_id)`
+  - `patient_speichern()` / `patient_aktualisieren()` speichern Medikamenteneinträge aus `daten["_medikamente"]`
+  - `_build_grp_medikamente()`: neue Gruppe mit Tabelle (Medikament / Dosis / Applikation) und „➕ Medikament hinzufügen"-Button
+  - `_medikament_hinzufuegen()`, `_aktualisiere_medikament_tabelle()`, `_medikament_entfernen()` als neue Methoden
+  - `export_patient_word()`: neuer Parameter `medikamente`, Abschnitt 7 zeigt Medikamenten-Tabelle
+  - `_word_protokoll()` / `_mail_protokoll()` laden und übergeben Medikamente
+
+#### `gui/sonderaufgaben.py`
+- **Bulmor-Dropdowns**: Option „a.D." immer verfügbar (auch ohne Dienstplan)
+- **Fahrzeugstatus-Spalte**: jede Bulmor-Zeile zeigt aktuellen Status (fahrbereit/defekt/Werkstatt/a.D.) aus der Fahrzeug-DB mit Farb-Badge
+- **„📋 Dienstplan öffnen"-Button**: nach Laden des Dienstplans wird Datei direkt in Excel geöffnet
+
+#### `gui/dienstplan.py`
+- **„📊 In Excel öffnen"-Button** in jedem Dienstplan-Pane-Header (aktiv nach Laden)
+- **Nach Stärkemeldungs-Export**: Ja/Nein-Dialog „Jetzt in Word öffnen?" + „Kopie speichern unter…"-Dialog
+
+---
+
+## 11.03.2026 – v3.3.0
+
+### Patienten DRK Station – vollständiges medizinisches Protokoll
+
+#### `gui/dienstliches.py`
+- **Erweitertes DB-Schema** mit 35+ Feldern + automatische Migration (ALTER TABLE)
+- **`_PatientenDialog`** komplett neu: 12 Abschnitte
+  - 1 │ Zeit & Dauer
+  - 2 │ Patient (Typ: Fluggast / Mitarbeiter / Besucher / Handwerker / Sonstiges)
+  - 3 │ Ereignis (Was / Wie / Ort)
+  - 4 │ Beschwerdebild (Beschwerdeart, Symptome)
+  - 5 │ ABCDE-Schema (Airway / Breathing / Circulation / Disability / Exposure)
+  - 6 │ Monitoring (BZ / RR / SpO2 / HF)
+  - 7 │ Vorerkrankungen & Medikamente des Patienten
+  - 8 │ Behandlung (Diagnose, Maßnahmen, Medikamentengabe)
+  - 9 │ Verbrauchsmaterial (Tabelle mit Material, Menge, Einheit)
+  - 10 │ Arbeitsunfall / BG-Fall
+  - 11 │ Personal & Abschluss (DRK MA 1/2, Weitergeleitet an)
+  - 12 │ Bemerkung
+- **`_PatientenTab`**: 13 Spalten, BG-Fall rot hervorgehoben
+- **`export_patient_word()`**: Word-Protokoll (.docx) mit DRK-Logo, DRK-Rot/Blau-Formatierung
+- **`_PatientenMailDialog`**: Outlook-Entwurf mit .docx-Anhang
+- **Buttons**: `📄 Word-Protokoll` + `📧 Per E-Mail senden`
+- **`_PATIENTEN_PROTO_DIR`**: `Daten/Patienten Station/Protokolle/`
+
+#### `functions/dienstplan_parser.py`
+- PermissionError-Fix beim Öffnen der Dienstplan-Excel-Datei
+
+#### `gui/backup_widget.py` _(neu)_
+- Backup-Widget für die GUI
+
+---
+
+## 08.03.2026 – v3.2.0
+
+### Telefonnummern-Verzeichnis
+
+- Neuer Sidebar-Button **📞 Telefonnummern** bei Index 11
+- `gui/telefonnummern.py`: 4 Tabs (Alle / Kontakte / Check-In / Interne & Gate)
+- `functions/telefonnummern_db.py`: SQLite-DB `database SQL/telefonnummern.db`, Import aus Excel
+- Backup → 12, Einstellungen → 13
+
+### PSA / Einsätze – Versendet-Tracking
+- Spalte `gesendet` in `einsaetze` und `psa_verstoss`
+- `markiere_einsatz_gesendet()` / `markiere_psa_gesendet()`
+
+---
+
 ## 05.03.2026 – v3.2.x
 
 ### Performance-Fixes & Async Mitarbeiter-Laden

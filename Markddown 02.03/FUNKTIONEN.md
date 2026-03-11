@@ -1,6 +1,6 @@
 ﻿# Nesk3 – Vollständige Funktionsübersicht
 
-**Stand:** 05.03.2026 – v3.2.x
+**Stand:** 11.03.2026 – v3.4.1
 
 ---
 
@@ -12,16 +12,18 @@
 |-------|------|-------|
 | 0 | 🏠 | Dashboard |
 | 1 | 👥 | Mitarbeiter |
-| 2 | ☀️ | Aufgaben Tag |
-| 3 | 🌙 | Aufgaben Nacht |
-| 4 | 📅 | Dienstplan |
-| 5 | 📋 | Übergabe |
-| 6 | 🚗 | Fahrzeuge |
-| 7 | 🕐 | Code 19 |
-| 8 | 🖨️ | Ma. Ausdrucke |
-| 9 | 🤒 | Krankmeldungen |
-| 10 | 💾 | Backup |
-| 11 | ⚙️ | Einstellungen |
+| 2 | ☕️ | Dienstliches |
+| 3 | ☀️ | Aufgaben Tag |
+| 4 | 🌙 | Aufgaben Nacht |
+| 5 | 📅 | Dienstplan |
+| 6 | 📋 | Übergabe |
+| 7 | 🚗 | Fahrzeuge |
+| 8 | 🕐 | Code 19 |
+| 9 | 🖨️ | Ma. Ausdrucke |
+| 10 | 🤒 | Krankmeldungen |
+| 11 | 📞 | Telefonnummern |
+| 12 | 💾 | Backup |
+| 13 | ⚙️ | Einstellungen |
 
 Alle Navigation-Refreshes über `QTimer.singleShot(0, fn)` – keine UI-Blockierung.
 
@@ -173,10 +175,14 @@ Erstellt Word-Dokument + DB-Eintrag. Öffnen/Drucken auf Nachfrage.
 - Excel laden, farbcodierte HTML-Tabelle
 - Statuszeile: Tagdienst/Nachtdienst/Krank, getrennt nach Betreuer/Dispo
 - `_DispoZeitenVorschauDialog`: Vergleich Excel vs. Export, manuelle Bearbeitung
+- **`_excel_open_btn`** in jedem Pane-Header: „📊 In Excel öffnen" (aktiv nach Laden)
+  - `_open_in_excel()`: öffnet Datei mit Windows-Standard-App
+- **Nach Stärkemeldungs-Export**: QMessageBox „Jetzt in Word öffnen?" + QFileDialog „Kopie speichern unter…" (`shutil.copy2`)
 
 ### `functions/dienstplan_parser.py`
 - `round_dispo=True/False`
 - `parse()`: inkl. Krank-Klassifizierung und Dispo-Abschnitt-Tracking
+- PermissionError-Handling beim Dateiöffnen
 
 ---
 
@@ -220,17 +226,29 @@ CREATE TABLE uebergabe_verspaetungen (
 
 ## 11. Datenbank (SQLite)
 
-Alle 5 SQLite-DBs liegen unter `database SQL/`. Alle nutzen WAL-Modus (`busy_timeout = 5 s`).
+Alle SQLite-DBs liegen unter `database SQL/`. Alle nutzen WAL-Modus (`busy_timeout = 5 s`).
 
 | Datei | Inhalt | Zugriff |
 |-------|--------|---------|
-| `nesk3.db` | Hauptdaten (Fahrzeuge, Übergabe, Einstellungen) | `database/connection.py` |
+| `nesk3.db` | Hauptdaten (Fahrzeuge, Übergabe, Einstellungen, Patienten, Medikamente) | `database/connection.py` |
 | `mitarbeiter.db` | Mitarbeiterstammdaten | `database/connection.py` |
 | `stellungnahmen.db` | Stellungnahmen-Metadaten | `functions/stellungnahmen_db.py` |
 | `verspaetungen.db` | Verspätungs-Protokolle | `functions/verspaetung_db.py` |
+| `telefonnummern.db` | Telefonnummern-Verzeichnis | `functions/telefonnummern_db.py` |
 | `archiv.db` | Archiv-Daten | separat |
 
 **`uebergabe_verspaetungen`** (in nesk3.db): Manuelle Verspätungseinträge je Protokoll
+
+**`medikamente`** (in nesk3.db): Medikamentengabe je Patienten-Protokoll
+```sql
+CREATE TABLE medikamente (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    patienten_id INTEGER REFERENCES patienten(id) ON DELETE CASCADE,
+    medikament   TEXT,
+    dosis        TEXT,
+    applikation  TEXT
+);
+```
 
 ---
 
@@ -239,3 +257,90 @@ Alle 5 SQLite-DBs liegen unter `database SQL/`. Alle nutzen WAL-Modus (`busy_tim
 - `create_zip_backup()` → `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
 - `list_zip_backups()`, `restore_from_zip(zip_path)`
 - Ausgeschlossen: `__pycache__`, `.git`, `Backup Data`, `backup`, `build_tmp`, `Exe`
+
+---
+
+## 13. Telefonnummern
+
+### `gui/telefonnummern.py` – `TelefonnummernWidget`
+- **4 Tabs**: 🔍 Alle · 📋 Kontakte · 🏪 Check-In (CIC) · 🚪 Interne & Gate
+- **Aktionsleiste**: 📥 Excel neu einlesen · ＋ Neu · ✏ Bearbeiten · 🗑 Löschen · 📋 Nummer kopieren · Suchfeld
+- **`_EintragDialog`**: Neu-Anlage und Bearbeiten; Bereich-/Kategorie-Dropdowns editierbar
+- Manuell eingetragene Zeilen gelb hervorgehoben (`#fff8e1`)
+- Auto-Import beim ersten Start oder bei veralteten Kategorienamen
+
+### `functions/telefonnummern_db.py`
+| Funktion | Beschreibung |
+|----------|-------------|
+| `importiere_aus_excel(clear_first)` | Importiert beide Excel-Dateien |
+| `lade_telefonnummern(suchtext, kategorie, quelle, sheet)` | Gefiltertes SELECT |
+| `lade_kategorien()` / `lade_sheets()` | Hilfsfunktionen |
+| `ist_db_leer()` / `hat_veraltete_daten()` | Zustandsprüfung |
+| `eintrag_speichern(daten)` | INSERT |
+| `eintrag_aktualisieren(id, daten)` | UPDATE |
+| `eintrag_loeschen(id)` | DELETE |
+
+---
+
+## 14. Dienstliches / Patienten Station
+
+### `gui/dienstliches.py` – `DienstlichesWidget`
+
+#### `_PatientenDialog` – 12 Abschnitte (v3.3.0+)
+| Nr. | Inhalt |
+|-----|--------|
+| 1 | Zeit & Dauer (Von/Bis, Dauer auto) |
+| 2 | Patient (Typ, Name, Abteilung, Alter, Geschlecht) |
+| 3 | Ereignis (Was / Wie / Ort) |
+| 4 | Beschwerdebild (Beschwerdeart, Symptome) |
+| 5 | ABCDE-Schema (Airway / Breathing / Circulation / Disability / Exposure) |
+| 6 | Monitoring (BZ / RR / SpO2 / HF) |
+| 7 | Vorerkrankungen & Medikamente des Patienten |
+| 8 | Behandlung (Diagnose, Maßnahmen) |
+| 9 | Verbrauchsmaterial (Tabelle: Material / Menge / Einheit) |
+| 10 | Arbeitsunfall / BG-Fall |
+| 11 | Personal & Abschluss (DRK MA 1/2, Weitergeleitet an) |
+| 12 | Bemerkung |
+
+#### `_build_grp_medikamente()` – Medikamentengabe als Tabelle (v3.4.0)
+- Tabelle mit Spalten: Medikament / Dosis / Applikation
+- „➕ Medikament hinzufügen"-Button (blau)
+- Methoden: `_medikament_hinzufuegen()`, `_aktualisiere_medikament_tabelle()`, `_medikament_entfernen()`
+- Applikation als Dropdown: i.v. / i.m. / s.c. / p.o. / inhalativ / sublingual / topisch / nasal / rektal / sonstig
+
+#### `_PatientenTab` – Übersichtstabelle
+- 13 Spalten, BG-Fall-Zeilen rot hervorgehoben
+- Buttons: `📋 Neu` · `✏ Bearbeiten` · `🗑 Löschen` · `📄 Word-Protokoll` · `📧 Per E-Mail senden`
+
+#### `export_patient_word()`
+- Erstellt `.docx` mit DRK-Logo, DRK-Rot/Blau-Formatierung
+- Alle 11+1 Abschnitte + Medikamenten-Tabelle
+- Speicherort: `Daten/Patienten Station/Protokolle/`
+
+#### `_PatientenMailDialog`
+- Outlook-Entwurf mit `.docx`-Anhang
+- Vorausgefüllter Betreff und Body
+
+#### DB-Schema (`nesk3.db` – Tabelle `patienten`)
+- 35+ Felder; automatische Migration (ALTER TABLE) bei Versions-Update
+- Verknüpft: `verbrauchsmaterial`, `medikamente` (CASCADE FK)
+
+---
+
+## 15. Sonderaufgaben (Aufgaben Nacht)
+
+### `gui/sonderaufgaben.py` – `SonderaufgabenWidget(QWidget)`
+_(eingebettet in `gui/aufgaben.py` – Aufgaben Nacht, Tab „Sonderaufgaben")_
+
+#### Bulmor-Abschnitt (v3.4.0)
+- Dropdowns: alle aktiven Fahrzeuge + **„a.D."** immer als letzte Option
+- **Fahrzeugstatus-Spalte**: zeigt aktuellen Status je Bulmor-Fahrzeug
+  - Farb-Badges: 🟢 fahrbereit · 🔴 defekt · 🟡 Werkstatt · ⚫ a.D.
+  - Daten aus `fahrzeug_functions.lade_alle_fahrzeuge()`
+  - Hilfsmethoden: `_bulmor_status_text()`, `_bulmor_status_style()`
+
+#### Dienstplan-Integration (v3.4.0)
+- **„📋 Dienstplan öffnen"-Button**: aktiv nach Laden eines Dienstplans
+- Öffnet Excel-Dienstplandatei direkt in Excel
+- `_dienstplan_pfad: str = ""` als neue Instanzvariable
+- `_open_dienstplan_excel()` als neue Methode

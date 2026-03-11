@@ -1,8 +1,8 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 02.03.2026 – v3.1.1
+**Stand:** 11.03.2026 – v3.4.1
 **Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn
-**Zweck:** Dienstplan, Stärkemeldung, Mitarbeiterverwaltung, Mitarbeiter-Dokumente, Stellungnahmen-DB
+**Zweck:** Dienstplan, Stärkemeldung, Mitarbeiterverwaltung, Mitarbeiter-Dokumente, Stellungnahmen-DB, Patienten-Protokoll, Telefonnummern, Hilfe-Screenshot-Galerie
 
 ---
 
@@ -15,7 +15,10 @@
 5. [Stellungnahmen-System](#5-stellungnahmen-system)
 6. [Lokale Web-Ansicht](#6-lokale-web-ansicht)
 7. [Übergabe & E-Mail](#7-übergabe--e-mail)
-8. [Bekannte Sonderfälle](#8-bekannte-sonderfälle)
+8. [Telefonnummern-Verzeichnis](#8-telefonnummern-verzeichnis)
+9. [Patienten Station](#9-patienten-station)
+10. [Sonderaufgaben-Widget](#10-sonderaufgaben-widget)
+11. [Bekannte Sonderfälle](#11-bekannte-sonderfälle)
 
 ---
 
@@ -26,24 +29,30 @@ Nesk3/
 ├── main.py
 ├── config.py
 ├── gui/
-│   ├── main_window.py               # Hauptfenster, 12 Nav-Einträge
+│   ├── main_window.py               # Hauptfenster, 14 Nav-Einträge (0–13)
+│   ├── dienstliches.py              # Patienten-Station, Einsätze, PSA
+│   ├── telefonnummern.py            # Telefonnummern-Verzeichnis (v3.2.0+)
 │   ├── mitarbeiter_dokumente.py     # Mitarbeiter-Dokumente + Stellungnahmen + DB-Browser
 │   ├── uebergabe.py                 # Übergabe + E-Mail (inkl. Stellungnahmen-Link)
+│   ├── sonderaufgaben.py            # Sonderaufgaben-Formular (Bulmor, E-Moby etc.)
 │   └── ...
 ├── functions/
 │   ├── mitarbeiter_dokumente_functions.py  # Word-Erstellung, STELLUNGNAHMEN_EXTERN_PFAD
 │   ├── stellungnahmen_db.py                # SQLite-Datenbank für Stellungnahmen
 │   ├── stellungnahmen_html_export.py       # HTML-Generator für Web-Ansicht
+│   ├── telefonnummern_db.py               # SQLite-Datenbank für Telefonnummern
 │   └── ...
 ├── WebNesk/
 │   ├── stellungnahmen_lokal.html    # Lokale Web-Ansicht (kein Server nötig)
 │   └── ...
 └── Daten/
-    └── Mitarbeiterdokumente/
-        ├── Stellungnahmen/
-        ├── Datenbank/
-        │   └── stellungnahmen.db
-        └── ...
+    ├── Mitarbeiterdokumente/
+    │   ├── Stellungnahmen/
+    │   ├── Datenbank/
+    │   │   └── stellungnahmen.db
+    │   └── ...
+    └── Patienten Station/
+        └── Protokolle/              # Exportierte Word-Protokolle
 ```
 
 ---
@@ -231,7 +240,64 @@ Bestehende Sektionen: Protokolldaten, Fahrzeugstatus, Fahrzeugschäden, Handys/G
 
 ---
 
-## 8. Bekannte Sonderfälle
+## 8. Telefonnummern-Verzeichnis
+
+### `functions/telefonnummern_db.py`
+- SQLite-Datenbank `database SQL/telefonnummern.db` (WAL-Modus)
+- Tabellen: `telefonnummern`, `tel_import_log`
+- `_CAT_NORMIERUNG`: Normalisiert rohe Excel-Spaltennamen (z.B. `"Check In Nummern"` → `"Check In B"`)
+- `importiere_aus_excel(clear_first=True)`: Importiert beide Excel-Dateien; gibt Anzahl zurück
+- Auto-Import bei leerem DB oder veralteten Kategorienamen (`ist_db_leer()`, `hat_veraltete_daten()`)
+
+### `gui/telefonnummern.py`
+- **4 Tabs**: 🔍 Alle · 📋 Kontakte · 🏪 Check-In (CIC) · 🚪 Interne & Gate
+- `_EintragDialog`: Neu/Bearbeiten mit editierbaren Bereich-/Kategorie-ComboBoxen
+- Manuell eingetragene Zeilen: gelb hervorgehoben (`#fff8e1`)
+- Doppelklick öffnet Bearbeiten-Dialog
+
+---
+
+## 9. Patienten Station
+
+### `gui/dienstliches.py` – `_PatientenTab` + `_PatientenDialog`
+
+#### DB-Schema (`nesk3.db`)
+- Tabelle `patienten` mit 35+ Feldern; automatische Migration (`ALTER TABLE`)
+- Tabelle `verbrauchsmaterial (id, patienten_id, material, menge, einheit)` – CASCADE FK
+- Tabelle `medikamente (id, patienten_id, medikament, dosis, applikation)` – CASCADE FK (v3.4.0)
+
+#### Protokoll-Dialog (`_PatientenDialog`)
+12 Abschnitte (scrollbar), Pflichtfelder: Von, Bis. Alle Felder werden bei Bearbeiten vorausgefüllt.
+
+Medikamentengabe (v3.4.0): Tabelle Medikament / Dosis / Applikation; Applikation als Dropdown.
+
+#### Word-Export (`export_patient_word()`)
+- Erstellt `.docx` mit DRK-Logo-Header, DRK-Rot/Blau-Überschriften
+- Section 7: Medikamenten-Tabelle
+- Speicherort: `Daten/Patienten Station/Protokolle/`
+
+#### E-Mail (`_PatientenMailDialog`)
+- Outlook-Entwurf via `pywin32`, `.docx`-Anhang, vorausgefüllter Betreff/Body
+
+---
+
+## 10. Sonderaufgaben-Widget
+
+### `gui/sonderaufgaben.py` – `SonderaufgabenWidget`
+_(eingebettet in `gui/aufgaben.py` – Aufgaben Nacht)_
+
+#### Bulmor-Abschnitt (v3.4.0)
+- Dropdowns: alle aktiven Fahrzeuge + **„a.D."** immer als letzte Option
+- Fahrzeugstatus-Spalte mit Farb-Badges: 🟢 fahrbereit · 🔴 defekt · 🟡 Werkstatt · ⚫ a.D.
+  - Daten aus `fahrzeug_functions.lade_alle_fahrzeuge()`
+
+#### Dienstplan-Integration (v3.4.0)
+- **„📋 Dienstplan öffnen"-Button**: aktiviert sich nach Laden des Dienstplans
+- Öffnet Excel-Datei direkt mit Windows-Standard-App
+
+---
+
+## 11. Bekannte Sonderfälle
 
 ### CareMan-Exportfehler
 - Dispo-Zeiten mit Minuten (07:15, 19:45) → `_runde_auf_volle_stunde()`

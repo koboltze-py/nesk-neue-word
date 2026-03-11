@@ -297,3 +297,39 @@ class MainWindow(QMainWindow):
         }
         if index in page_map:
             QTimer.singleShot(0, page_map[index])
+
+    # ── Screenshot-Erstellung ──────────────────────────────────────────────────
+    def grab_all_screenshots(self, callback=None):
+        """
+        Erstellt PNG-Screenshots aller App-Seiten und speichert sie in
+        Daten/Hilfe/screenshots/{idx:02d}.png.
+        Ruft am Ende callback(list[str]) auf.
+        """
+        ss_dir = Path(BASE_DIR) / "Daten" / "Hilfe" / "screenshots"
+        ss_dir.mkdir(parents=True, exist_ok=True)
+
+        self._ss_paths: list[str] = []
+        self._ss_idx: int = 0
+        self._ss_dir = ss_dir
+        self._ss_callback = callback
+
+        def _grab_next():
+            if self._ss_idx >= len(NAV_ITEMS):
+                self._navigate(0)
+                if self._ss_callback:
+                    self._ss_callback(self._ss_paths)
+                return
+            _icon, _label, page_idx = NAV_ITEMS[self._ss_idx]
+            self._navigate(page_idx)
+            QTimer.singleShot(300, _do_grab)
+
+        def _do_grab():
+            _icon, _label, page_idx = NAV_ITEMS[self._ss_idx]
+            pixmap = self._stack.grab()
+            fpath = str(self._ss_dir / f"{page_idx:02d}.png")
+            pixmap.save(fpath, "PNG")
+            self._ss_paths.append(fpath)
+            self._ss_idx += 1
+            QTimer.singleShot(50, _grab_next)
+
+        _grab_next()

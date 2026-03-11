@@ -1,6 +1,6 @@
 # Nesk3 – Reproduktionsprotokoll
 
-**Stand:** 02.03.2026 – v3.1.1
+**Stand:** 11.03.2026 – v3.4.1
 
 ---
 
@@ -27,11 +27,16 @@ Nesk3/
 ├── main.py, config.py
 ├── gui/
 │   ├── main_window.py, dashboard.py, mitarbeiter_dokumente.py
-│   ├── uebergabe.py, fahrzeuge.py, dienstplan.py, ...
+│   ├── uebergabe.py, fahrzeuge.py, dienstplan.py
+│   ├── dienstliches.py              # Patienten-Station (v3.3.0+)
+│   ├── telefonnummern.py            # Telefonnummern-Verzeichnis (v3.2.0+)
+│   ├── sonderaufgaben.py            # Sonderaufgaben-Formular (v3.4.0 erweitert)
+│   └── ...
 ├── functions/
 │   ├── mitarbeiter_dokumente_functions.py
 │   ├── stellungnahmen_db.py
 │   ├── stellungnahmen_html_export.py
+│   ├── telefonnummern_db.py         # NEU v3.2.0
 │   └── ...
 ├── database/ (connection.py, migrations.py, models.py)
 ├── backup/ (backup_manager.py)
@@ -39,10 +44,12 @@ Nesk3/
 │   ├── stellungnahmen_lokal.html   ← generiert, kein Server nötig
 │   └── ...
 └── Daten/
-    └── Mitarbeiterdokumente/
-        ├── Stellungnahmen/, Bescheinigungen/, ...
-        ├── Datenbank/stellungnahmen.db
-        └── Mitarbeiter Vorlagen/Kopf und Fußzeile/...docx
+    ├── Mitarbeiterdokumente/
+    │   ├── Stellungnahmen/, Bescheinigungen/, ...
+    │   ├── Datenbank/stellungnahmen.db
+    │   └── Mitarbeiter Vorlagen/Kopf und Fußzeile/...docx
+    └── Patienten Station/
+        └── Protokolle/              ← Word-Exporte (.docx)
 ```
 
 ---
@@ -54,7 +61,9 @@ from database.migrations import run_migrations
 run_migrations()
 ```
 
-Die Stellungnahmen-DB wird automatisch beim ersten Aufruf von `stellungnahmen_db.py` erstellt.
+Die Stellungnahmen-DB wird automatisch beim ersten Aufruf von `stellungnahmen_db.py` erstellt.  
+Die Telefonnummern-DB wird beim ersten Start von `TelefonnummernWidget` angelegt und befüllt.  
+Die Patienten-DB (`patienten`, `verbrauchsmaterial`, `medikamente`) wird automatisch migriert – bestehende `patienten`-Tabellen werden per `ALTER TABLE` erweitert.
 
 ---
 
@@ -89,6 +98,9 @@ Direktlink zu Datensatz 42: `...html#id-42`
 | Outlook-Mail nicht erstellt | pywin32 installieren, Outlook öffnen |
 | Vorlage nicht gefunden | Pfad in mitarbeiter_dokumente_functions.py prüfen |
 | HTML-Seite leer | Noch keine Stellungnahmen angelegt oder generiere_html() aufrufen |
+| Telefonnummern-Tab leer | Excel-Dateien in Daten/Telefonnummern/ ablegen, „📥 Excel neu einlesen" klicken |
+| Patienten-Word-Export fehlt | python-docx installieren; Ordner Daten/Patienten Station/Protokolle/ anlegen |
+| Dienstplan in Excel öffnen schlägt fehl | Excel installiert und als Standard-App für .xlsx gesetzt? |
 
 ---
 

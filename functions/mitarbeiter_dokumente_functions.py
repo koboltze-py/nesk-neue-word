@@ -27,7 +27,7 @@ STELLUNGNAHMEN_EXTERN_PFAD = os.path.join(
 
 KATEGORIEN = [
     "Stellungnahmen",
-    "Bescheinigungen",
+    "Bescheinigungen und Anträge",
     "Dienstanweisungen",
     "PSA",
     "Verspätung",

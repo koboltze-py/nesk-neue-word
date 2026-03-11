@@ -20,7 +20,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, QSize, QTime
 from PySide6.QtGui import QFont, QColor, QIcon
 
-from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_BORDER
+from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_BORDER, BASE_DIR
+
+# Tagesausweis-Konstanten
+_TAGESAUSWEIS_URL = (
+    "https://id.koeln-bonn-airport.de/form/?gtwname=lpfportal_40695311889"
+    "&authtype=0&timeout=21600&uri=IekQNXxzz6VsKdBHmb705nJCLYoYe"
+    "&login_hint=&lpfForceChoice="
+)
+_TAGESAUSWEIS_PDF = os.path.join(
+    BASE_DIR, "Daten", "Tagesausweis", "ASR2990-Antrag_Tagesausweis.pdf"
+)
 
 from functions.mitarbeiter_dokumente_functions import (
     KATEGORIEN, DOKUMENTE_BASIS, VORLAGE_PFAD, STELLUNGNAHMEN_EXTERN_PFAD,
@@ -1151,6 +1161,44 @@ class MitarbeiterDokumenteWidget(QWidget):
         dff.addStretch()
         tl.addWidget(self._datei_filter_frame)
 
+        # ── Tagesausweis / Anträge-Panel (nur bei Bescheinigungen und Anträge) ─
+        self._antraege_panel = QFrame()
+        self._antraege_panel.setStyleSheet(
+            "QFrame{background:#e8f4fd;border:1px solid #90caf9;"
+            "border-radius:6px;padding:4px;}"
+        )
+        self._antraege_panel.setVisible(False)
+        ap_layout = QVBoxLayout(self._antraege_panel)
+        ap_layout.setContentsMargins(12, 10, 12, 10)
+        ap_layout.setSpacing(8)
+
+        ap_title = QLabel("🪪  Tagesausweis – Schnellzugriff")
+        ap_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        ap_title.setStyleSheet("color:#0d47a1; border:none; background:transparent;")
+        ap_layout.addWidget(ap_title)
+
+        ap_btn_row = QHBoxLayout()
+        ap_btn_row.setSpacing(10)
+
+        self._btn_ta_portal = _btn("🌐  Ausweisportal öffnen", "#0078d4", "#005a9e")
+        self._btn_ta_portal.setToolTip("Tagesausweis-Portal im Browser öffnen")
+        self._btn_ta_portal.clicked.connect(self._tagesausweis_portal_oeffnen)
+        ap_btn_row.addWidget(self._btn_ta_portal)
+
+        self._btn_ta_pdf = _btn("📄  Antragsformular öffnen", "#107e3e", "#0a5c2e")
+        self._btn_ta_pdf.setToolTip("PDF-Antrag Tagesausweis öffnen")
+        self._btn_ta_pdf.clicked.connect(self._tagesausweis_pdf_oeffnen)
+        ap_btn_row.addWidget(self._btn_ta_pdf)
+
+        self._btn_ta_mail = _btn("📧  E-Mail an Registration", "#6d1a7a", "#4a1155")
+        self._btn_ta_mail.setToolTip("Tagesausweis-Antrag per E-Mail an registration@koeln-bonn-airport.de senden")
+        self._btn_ta_mail.clicked.connect(self._tagesausweis_email_senden)
+        ap_btn_row.addWidget(self._btn_ta_mail)
+
+        ap_btn_row.addStretch()
+        ap_layout.addLayout(ap_btn_row)
+        tl.addWidget(self._antraege_panel)
+
         self._table = QTableWidget()
         self._table.setColumnCount(3)
         self._table.setHorizontalHeaderLabels(["Dateiname", "Zuletzt geändert", "Typ"])
@@ -1948,9 +1996,10 @@ class MitarbeiterDokumenteWidget(QWidget):
         """Tabelle mit Dateien der gewählten Kategorie befüllen."""
         self._akt_kategorie = kategorie
         self._kat_label.setText(f"📁  {kategorie}")
-        is_stell = (kategorie == "Stellungnahmen")
-        is_versp = (kategorie == "Verspätung")
-        is_psa   = (kategorie == "PSA")
+        is_stell  = (kategorie == "Stellungnahmen")
+        is_versp  = (kategorie == "Verspätung")
+        is_psa    = (kategorie == "PSA")
+        is_antrag = (kategorie == "Bescheinigungen und Anträge")
         self._btn_stellungnahme.setVisible(is_stell)
         self._btn_web.setVisible(is_stell)
         self._tabs.setTabVisible(1, is_stell)
@@ -1960,6 +2009,7 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._tabs.setTabVisible(0, not is_versp and not is_psa)  # Dateien-Tab ausblenden
         self._tabs.setTabVisible(2, is_versp)
         self._tabs.setTabVisible(3, is_psa)
+        self._antraege_panel.setVisible(is_antrag)
         if is_psa:
             self._tabs.setCurrentIndex(3)
             self._psa_jahre_aktualisieren()
@@ -2016,6 +2066,81 @@ class MitarbeiterDokumenteWidget(QWidget):
     def _ordner_oeffnen(self):
         import subprocess
         subprocess.Popen(["explorer", DOKUMENTE_BASIS], shell=False)
+
+    # ── Tagesausweis / Anträge ────────────────────────────────────────────────
+
+    def _tagesausweis_portal_oeffnen(self):
+        webbrowser.open(_TAGESAUSWEIS_URL)
+
+    def _tagesausweis_pdf_oeffnen(self):
+        if not os.path.isfile(_TAGESAUSWEIS_PDF):
+            QMessageBox.warning(
+                self, "Datei nicht gefunden",
+                f"Das Antragsformular wurde nicht gefunden:\n{_TAGESAUSWEIS_PDF}\n\n"
+                "Bitte die Datei unter Daten/Tagesausweis/ ablegen."
+            )
+            return
+        oeffne_datei(_TAGESAUSWEIS_PDF)
+
+    def _tagesausweis_email_senden(self):
+        name, ok = QInputDialog.getText(
+            self, "Mitarbeitername", "Name des Mitarbeiters:"
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+
+        # Datei-Auswahl für den Anhang
+        start_dir = os.path.dirname(_TAGESAUSWEIS_PDF) if os.path.isfile(_TAGESAUSWEIS_PDF) else BASE_DIR
+        anhang_pfad, _ = QFileDialog.getOpenFileName(
+            self,
+            "Anhang auswählen",
+            start_dir,
+            "Alle Dateien (*.*);;PDF-Dateien (*.pdf);;Word-Dokumente (*.docx *.doc)",
+        )
+        # Anhang ist optional – leerer String = kein Anhang
+        if anhang_pfad == "":
+            antwort = QMessageBox.question(
+                self, "Ohne Anhang senden?",
+                "Es wurde keine Datei ausgewählt.\nE-Mail trotzdem ohne Anhang erstellen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if antwort != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            import win32com.client  # noqa
+            try:
+                outlook = win32com.client.GetActiveObject("Outlook.Application")
+            except Exception:
+                outlook = win32com.client.Dispatch("Outlook.Application")
+
+            mail = outlook.CreateItem(0)
+            mail.Display()                     # Outlook lädt Standardsignatur
+            signature = mail.HTMLBody          # enthält die geladene Signatur
+
+            mail.To      = "registration@koeln-bonn-airport.de"
+            mail.Subject = f"Tagesausweisantrag – {name}"
+
+            body_html = (
+                "<html><body style='font-family:Calibri,Arial,sans-serif;font-size:11pt;'>"
+                "<p>Sehr geehrte Damen und Herren,</p>"
+                f"<p>anbei der Tagesausweisantrag für Mitarbeiter <strong>{name}</strong>.</p>"
+                "<p>Mit freundlichen Grüßen</p>"
+                "</body></html>"
+            )
+            mail.HTMLBody = body_html + signature
+
+            if anhang_pfad and os.path.isfile(anhang_pfad):
+                mail.Attachments.Add(anhang_pfad)
+
+        except ImportError:
+            QMessageBox.critical(
+                self, "Outlook nicht verfügbar",
+                "pywin32 ist nicht installiert. Bitte mit `pip install pywin32` nachrüsten."
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", str(exc))
 
     def _dokument_oeffnen(self):
         eintrag = self._aktueller_eintrag()

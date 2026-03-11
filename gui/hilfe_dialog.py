@@ -4,18 +4,21 @@ Erklärt alle Module und Funktionen der App visuell – mit Animationen.
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QWidget, QTabWidget, QSizePolicy,
-    QGridLayout, QGraphicsOpacityEffect, QProgressBar,
+    QGridLayout, QGraphicsOpacityEffect, QProgressBar, QMessageBox,
 )
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve,
     QRect, QParallelAnimationGroup,
 )
-from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor
+from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor, QPixmap
 
-from config import FIORI_BLUE, FIORI_TEXT, APP_VERSION
+from config import FIORI_BLUE, FIORI_TEXT, APP_VERSION, BASE_DIR
 
 
 # ── Farbpalette der Module ────────────────────────────────────────────────────
@@ -31,6 +34,42 @@ _COLORS = {
     "krankmeldung": "#d35400",
     "backup":       "#7f8c8d",
     "einstellung":  "#2c3e50",
+}
+
+
+# ── Screenshot-Navigation (entspricht NAV_ITEMS in main_window) ───────────────
+_NAV_ITEMS_SS = [
+    ("🏠",  "Dashboard",        0),
+    ("👥",  "Mitarbeiter",       1),
+    ("☕️", "Dienstliches",      2),
+    ("☀️", "Aufgaben Tag",      3),
+    ("🌙",  "Aufgaben Nacht",   4),
+    ("📅",  "Dienstplan",       5),
+    ("📋",  "Übergabe",         6),
+    ("🚗",  "Fahrzeuge",        7),
+    ("🕐",  "Code 19",          8),
+    ("🖨️", "Ma. Ausdrucke",    9),
+    ("🤒",  "Krankmeldungen",  10),
+    ("📞",  "Telefonnummern",  11),
+    ("💾",  "Backup",          12),
+    ("⚙️",  "Einstellungen",   13),
+]
+
+_LABEL_COLORS: dict[str, str] = {
+    "Dashboard":      "#0a73c4",
+    "Mitarbeiter":    "#1a6599",
+    "Dienstliches":   "#c0392b",
+    "Aufgaben Tag":   "#e67e22",
+    "Aufgaben Nacht": "#8e44ad",
+    "Dienstplan":     "#27ae60",
+    "Übergabe":       "#2980b9",
+    "Fahrzeuge":      "#c0392b",
+    "Code 19":        "#e74c3c",
+    "Ma. Ausdrucke":  "#16a085",
+    "Krankmeldungen": "#d35400",
+    "Telefonnummern": "#0a73c4",
+    "Backup":         "#7f8c8d",
+    "Einstellungen":  "#2c3e50",
 }
 
 
@@ -242,6 +281,144 @@ class _TipCard(QFrame):
         cl.addLayout(tl, 1)
 
 
+# ── Screenshot Vollbild-Vorschau ─────────────────────────────────────────────
+class _FullscreenPreview(QDialog):
+    """Zeigt einen Seiten-Screenshot in voller Größe."""
+
+    def __init__(self, img_path: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Vollbild-Vorschau")
+        self.setWindowFlags(
+            self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint
+        )
+        self.resize(1150, 820)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            "QScrollArea { border: 1px solid #555; border-radius: 6px; background: #1e1e2e; }"
+        )
+        lbl = QLabel()
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet("background: #1e1e2e; padding: 16px;")
+        pix = QPixmap(img_path)
+        if not pix.isNull():
+            lbl.setPixmap(pix)
+        else:
+            lbl.setText("Screenshot konnte nicht geladen werden.")
+            lbl.setStyleSheet("color: #ddd; background: #1e1e2e; padding: 16px; font-size: 14px;")
+        scroll.setWidget(lbl)
+        lay.addWidget(scroll, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("✕  Schließen")
+        close_btn.setMinimumHeight(34)
+        close_btn.setMinimumWidth(120)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {FIORI_BLUE}; color: white;
+                border: none; border-radius: 4px;
+                padding: 6px 20px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #0855a9; }}
+        """)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+
+# ── Screenshot-Karte ──────────────────────────────────────────────────────────
+class _ScreenshotCard(QFrame):
+    """Modul-Karte mit Screenshot-Thumbnail – klickbar für Vollbild."""
+
+    def __init__(self, icon: str, title: str, img_path: str | None,
+                 color: str, on_click=None, parent=None):
+        super().__init__(parent)
+        self._on_click = on_click
+        if on_click:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._default_style = (
+            "QFrame { background: white; border-radius: 8px; border: 2px solid #e8e8e8; }"
+        )
+        self._hover_style = (
+            "QFrame { background: white; border-radius: 8px; border: 2px solid #0a73c4; }"
+        )
+        self.setStyleSheet(self._default_style)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 10)
+        lay.setSpacing(6)
+
+        # Bild-Bereich
+        img_lbl = QLabel()
+        img_lbl.setFixedHeight(210)
+        img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if img_path and os.path.exists(img_path):
+            pix = QPixmap(img_path)
+            if not pix.isNull():
+                scaled = pix.scaled(
+                    430, 210,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                img_lbl.setPixmap(scaled)
+                img_lbl.setStyleSheet(
+                    "background: #f0f4f8; border-radius: 4px; border: none;"
+                )
+            else:
+                img_lbl.setText("Nicht lesbar")
+                img_lbl.setStyleSheet(
+                    "color: #ccc; background: #f4f4f4; border-radius: 4px; border: none;"
+                )
+        else:
+            img_lbl.setFont(QFont("Segoe UI Emoji", 32))
+            img_lbl.setText(icon)
+            img_lbl.setStyleSheet(
+                f"color: {color}55; background: #f8f9fb; "
+                "border-radius: 4px; border: 1px dashed #ddd;"
+            )
+        lay.addWidget(img_lbl)
+
+        # Titelzeile
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        ico_l = QLabel(icon)
+        ico_l.setFont(QFont("Segoe UI Emoji", 13))
+        ico_l.setStyleSheet("border: none;")
+        ico_l.setFixedWidth(26)
+        ttl_l = QLabel(title)
+        ttl_l.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        ttl_l.setStyleSheet(f"color: {color}; border: none;")
+        row.addWidget(ico_l)
+        row.addWidget(ttl_l, 1)
+        lay.addLayout(row)
+
+        if on_click:
+            hint = QLabel("🔍 Klicken für Vollbild")
+            hint.setFont(QFont("Arial", 9))
+            hint.setStyleSheet("color: #bbb; border: none;")
+            lay.addWidget(hint)
+
+    def mousePressEvent(self, event):
+        if self._on_click:
+            self._on_click()
+        super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        if self._on_click:
+            self.setStyleSheet(self._hover_style)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setStyleSheet(self._default_style)
+        super().leaveEvent(event)
+
+
 # ── Haupt-Dialog ─────────────────────────────────────────────────────────────
 class HilfeDialog(QDialog):
     def __init__(self, parent=None):
@@ -286,6 +463,7 @@ class HilfeDialog(QDialog):
         self._tabs.addTab(self._tab_workflow(),      "🔄  Workflow")
         self._tabs.addTab(self._tab_tipps(),         "💡  Tipps & FAQ")
         self._tabs.addTab(self._tab_anleitungen(),   "📖  Anleitungen")
+        self._tabs.addTab(self._tab_screenshots(),    "📸  Vorschau")
         self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._tabs, 1)
 
@@ -955,6 +1133,120 @@ class HilfeDialog(QDialog):
         root.addStretch()
         self._tab_widgets[4] = all_cards
         return self._scroll_wrap(w)
+
+    # ── Tab 5: Screenshots / Vorschau ─────────────────────────────────────────
+    def _tab_screenshots(self) -> QWidget:
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(12)
+
+        root.addWidget(self._section_label("📸  Alle Module auf einen Blick"))
+
+        info_lbl = QLabel(
+            "Hier sehen Sie Screenshots aller Programmseiten. "
+            "Klicken Sie auf ein Bild für eine vergrößerte Ansicht.\n"
+            "Falls noch keine Bilder vorhanden sind: "
+            "\"Screenshots erstellen\" klicken – die App durchläuft kurz alle Seiten."
+        )
+        info_lbl.setWordWrap(True)
+        info_lbl.setFont(QFont("Arial", 11))
+        info_lbl.setStyleSheet(
+            "color: #445; background: #eef4fb; border-radius: 6px; "
+            "border: 1px solid #c8dff0; padding: 10px 14px;"
+        )
+        root.addWidget(info_lbl)
+
+        btn_row = QHBoxLayout()
+        self._create_ss_btn = QPushButton("📸  Screenshots erstellen / aktualisieren")
+        self._create_ss_btn.setMinimumHeight(36)
+        self._create_ss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._create_ss_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {FIORI_BLUE}; color: white;
+                border: none; border-radius: 4px;
+                padding: 6px 18px; font-size: 12px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #0855a9; }}
+            QPushButton:disabled {{ background-color: #aaa; }}
+        """)
+        self._create_ss_btn.clicked.connect(self._trigger_screenshots)
+        btn_row.addStretch()
+        btn_row.addWidget(self._create_ss_btn)
+        root.addLayout(btn_row)
+
+        self._ss_status_lbl = QLabel("")
+        self._ss_status_lbl.setFont(QFont("Arial", 10))
+        self._ss_status_lbl.setStyleSheet("color: #888;")
+        root.addWidget(self._ss_status_lbl)
+
+        self._ss_grid_container = QWidget()
+        self._ss_grid = QGridLayout(self._ss_grid_container)
+        self._ss_grid.setSpacing(14)
+        self._load_screenshot_grid()
+        root.addWidget(self._ss_grid_container)
+        root.addStretch()
+        return self._scroll_wrap(w)
+
+    def _load_screenshot_grid(self):
+        """Lädt vorhandene Screenshots neu ins Grid."""
+        while self._ss_grid.count():
+            item = self._ss_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        ss_dir = Path(BASE_DIR) / "Daten" / "Hilfe" / "screenshots"
+        count_found = 0
+        for i, (icon, label, page_idx) in enumerate(_NAV_ITEMS_SS):
+            img_path = ss_dir / f"{page_idx:02d}.png"
+            img_exists = img_path.exists()
+            if img_exists:
+                count_found += 1
+            color = _LABEL_COLORS.get(label, "#0a73c4")
+            card = _ScreenshotCard(
+                icon, label,
+                str(img_path) if img_exists else None,
+                color,
+                on_click=(lambda p=str(img_path): self._open_preview(p)) if img_exists else None,
+            )
+            self._ss_grid.addWidget(card, i // 2, i % 2)
+
+        if count_found == 0:
+            self._ss_status_lbl.setText(
+                "ℹ️  Noch keine Screenshots vorhanden. "
+                "Bitte auf \"Screenshots erstellen\" klicken."
+            )
+            self._ss_status_lbl.setStyleSheet("color: #888; font-style: italic;")
+        else:
+            self._ss_status_lbl.setText(
+                f"✅  {count_found} von {len(_NAV_ITEMS_SS)} Screenshots vorhanden  ·  "
+                f"Gespeichert in: {ss_dir}"
+            )
+            self._ss_status_lbl.setStyleSheet("color: #107e3e;")
+
+    def _trigger_screenshots(self):
+        """Löst die Screenshot-Erstellung im Hauptfenster aus."""
+        mw = self.parent()
+        if not hasattr(mw, "grab_all_screenshots"):
+            QMessageBox.warning(
+                self, "Nicht verfügbar",
+                "Screenshot-Funktion nicht gefunden.\nBitte die App neu starten."
+            )
+            return
+        self._create_ss_btn.setEnabled(False)
+        self._create_ss_btn.setText("⏳  Kurz warten – alle Seiten werden durchlaufen…")
+
+        def _done(_paths):
+            self._create_ss_btn.setEnabled(True)
+            self._create_ss_btn.setText("📸  Screenshots erstellen / aktualisieren")
+            self._load_screenshot_grid()
+
+        mw.grab_all_screenshots(callback=_done)
+
+    def _open_preview(self, img_path: str):
+        """Öffnet den Vollbild-Vorschau-Dialog."""
+        dlg = _FullscreenPreview(img_path, self)
+        dlg.exec()
 
     # ── Gemeinsame Helfer ─────────────────────────────────────────────────────
     @staticmethod

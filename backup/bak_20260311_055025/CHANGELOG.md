@@ -5,55 +5,6 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
-## 11.03.2026 – v3.4.1
-
-### Hilfe-Dialog: Live-Screenshot-Galerie + Benutzeranleitung
-
-#### `gui/hilfe_dialog.py`
-- **Neuer Tab "📸 Vorschau"**: 2-spaltige Kachelgalerie aller 14 App-Seiten als Screenshots
-- **`_ScreenshotCard`**: Kachel mit Thumbnail (430×210 px), Hover-Highlight, Klick öffnet Vollbild
-- **`_FullscreenPreview`**: Modaler Vollbild-Dialog (maximierbar, Scrollbar, dunkler Hintergrund)
-- **Schaltfläche „Screenshots erstellen / aktualisieren“**: durchläuft alle Seiten, zeigt Fortschritt
-- Screenshots werden in `Daten/Hilfe/screenshots/{idx:02d}.png` gespeichert
-- Status-Label: zeigt Anzahl vorhandener Screenshots und Speicherpfad
-- Platzhalter-Kacheln (Emoji) wenn noch kein Bild vorhanden
-
-#### `gui/main_window.py`
-- **`grab_all_screenshots(callback=None)`**: Neue Methode navigt timer-basiert (300 ms/Seite) alle 14 Seiten durch, speichert `QStackedWidget.grab()` als PNG, ruft danach `callback(paths)` auf
-
-#### `docs/BENUTZERANLEITUNG.md` _(neu)_
-- Vollständige deutschsprachige Benutzeranleitung (17 Abschnitte)
-- ASCII-UI-Mockups aller Module, Mermaid-Ablaufdiagramme, Tabellen
-- Abdeckung: alle 14 nav-Bereiche inkl. Tagesausweis-Panel, ABCDE-Schema, Backup-Typen
-
----
-
-## 11.03.2026 – v3.4.0
-
-### Medikamentengabe als Tabelle, Sonderaufgaben-Erweiterungen, Dienstplan-Verbesserungen
-
-#### `gui/dienstliches.py`
-- **Medikamentengabe** komplett neu als Tabelle (wie Verbrauchsmaterial):
-  - Neue DB-Tabelle `medikamente (id, patienten_id, medikament, dosis, applikation)` mit CASCADE-FK
-  - Neue Funktion `lade_medikamente(patienten_id)`
-  - `patient_speichern()` / `patient_aktualisieren()` speichern Medikamenteneinträge aus `daten["_medikamente"]`
-  - `_build_grp_medikamente()`: neue Gruppe mit Tabelle (Medikament / Dosis / Applikation) und „➕ Medikament hinzufügen"-Button
-  - `_medikament_hinzufuegen()`, `_aktualisiere_medikament_tabelle()`, `_medikament_entfernen()` als neue Methoden
-  - `_befuellen()` lädt beim Bearbeiten Medikamente aus DB
-  - `export_patient_word()`: neuer Parameter `medikamente`, Abschnitt 7 zeigt Medikamenten-Tabelle
-  - `_word_protokoll()` / `_mail_protokoll()` laden und übergeben Medikamente
-
-#### `gui/sonderaufgaben.py`
-- **Bulmor-Dropdowns**: Option „a.D." immer verfügbar (auch ohne Dienstplan)
-- **Fahrzeugstatus-Spalte**: jede Bulmor-Zeile zeigt aktuellen Status (fahrbereit/defekt/Werkstatt/a.D.) aus der Fahrzeug-DB mit Farb-Badge
-- **„📋 Dienstplan öffnen"-Button**: nach Laden des Dienstplans wird Datei direkt in Excel geöffnet
-
-#### `gui/dienstplan.py`
-- **„📊 In Excel öffnen"-Button** in jedem Dienstplan-Pane-Header (aktiv nach Laden)
-- **Nach Stärkemeldungs-Export**: Ja/Nein-Dialog „Jetzt in Word öffnen?" + „Kopie speichern unter…"-Dialog
-
----
-
 ## 11.03.2026 – v3.3.0
 
 ### Patienten DRK Station – vollständiges medizinisches Protokoll
