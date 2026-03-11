@@ -3,8 +3,13 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.2.0 (08.03.2026)  
+**Version:** v3.3.0 (11.03.2026)  
 **Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · Ma. Ausdrucke · Krankmeldungen · **Telefonnummern** · Backup · Einstellungen · Hilfe
+
+### Neu in v3.3.0
+- **Patienten DRK Station**: vollständiges medizinisches Protokoll (ABCDE, Monitoring, Arbeitsunfall)
+- **Word-Export**: Protokoll als formatiertes .docx mit DRK-Logo
+- **E-Mail**: Protokoll als Outlook-Entwurf mit Word-Anhang versendbar
 
 ---
 
