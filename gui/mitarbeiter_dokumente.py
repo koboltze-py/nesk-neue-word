@@ -1398,6 +1398,8 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._db_table.verticalHeader().setVisible(False)
         self._db_table.itemSelectionChanged.connect(self._db_auswahl_geaendert)
         self._db_table.itemDoubleClicked.connect(lambda _: self._db_dokument_oeffnen())
+        self._db_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._db_table.customContextMenuRequested.connect(self._db_kontextmenu)
         layout.addWidget(self._db_table, 1)
 
         # ── Aktions-Buttons DB ────────────────────────────────────────────────
@@ -1512,6 +1514,8 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._versp_table.verticalHeader().setVisible(False)
         self._versp_table.itemSelectionChanged.connect(self._versp_auswahl_geaendert)
         self._versp_table.itemDoubleClicked.connect(lambda _: self._verspaetung_oeffnen())
+        self._versp_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._versp_table.customContextMenuRequested.connect(self._versp_kontextmenu)
         layout.addWidget(self._versp_table, 1)
 
         # ── Aktions-Buttons ───────────────────────────────────────────────────
@@ -1628,6 +1632,9 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._psa_table.setStyleSheet("QTableWidget{border:1px solid #ddd;font-size:12px;}")
         self._psa_table.verticalHeader().setVisible(False)
         self._psa_table.itemSelectionChanged.connect(self._psa_auswahl_geaendert)
+        self._psa_table.itemDoubleClicked.connect(lambda _: self._psa_bearbeiten())
+        self._psa_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._psa_table.customContextMenuRequested.connect(self._psa_kontextmenu)
         layout.addWidget(self._psa_table, 1)
 
         pbtn_row = QHBoxLayout()
@@ -2373,6 +2380,72 @@ class MitarbeiterDokumenteWidget(QWidget):
             self._dokument_umbenennen()
         elif action == act_loeschen:
             self._dokument_loeschen()
+
+    def _db_kontextmenu(self, pos):
+        """Rechtsklick-Menü auf DB-Suche (Stellungnahmen)-Tabelle."""
+        from PySide6.QtWidgets import QMenu
+        row = self._db_table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._db_table.selectRow(row)
+
+        menu = QMenu(self)
+        act_oeffnen  = menu.addAction("📂  Dokument öffnen")
+        act_details  = menu.addAction("🔎  Details anzeigen")
+        menu.addSeparator()
+        act_loeschen = menu.addAction("🗑  DB-Eintrag löschen")
+
+        action = menu.exec(self._db_table.viewport().mapToGlobal(pos))
+        if action == act_oeffnen:
+            self._db_dokument_oeffnen()
+        elif action == act_details:
+            self._db_details_anzeigen()
+        elif action == act_loeschen:
+            self._db_eintrag_loeschen()
+
+    def _versp_kontextmenu(self, pos):
+        """Rechtsklick-Menü auf Verspätungs-Protokoll-Tabelle."""
+        from PySide6.QtWidgets import QMenu
+        row = self._versp_table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._versp_table.selectRow(row)
+
+        menu = QMenu(self)
+        act_oeffnen     = menu.addAction("📂  Dokument öffnen")
+        act_bearbeiten  = menu.addAction("✏  Bearbeiten")
+        act_mail        = menu.addAction("📧  Per E-Mail senden")
+        menu.addSeparator()
+        act_loeschen    = menu.addAction("🗑  Löschen")
+
+        action = menu.exec(self._versp_table.viewport().mapToGlobal(pos))
+        if action == act_oeffnen:
+            self._verspaetung_oeffnen()
+        elif action == act_bearbeiten:
+            self._verspaetung_bearbeiten()
+        elif action == act_mail:
+            self._verspaetung_mail_senden()
+        elif action == act_loeschen:
+            self._verspaetung_loeschen()
+
+    def _psa_kontextmenu(self, pos):
+        """Rechtsklick-Menü auf PSA-Protokoll-Tabelle."""
+        from PySide6.QtWidgets import QMenu
+        row = self._psa_table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._psa_table.selectRow(row)
+
+        menu = QMenu(self)
+        act_bearbeiten  = menu.addAction("✏  Bearbeiten")
+        menu.addSeparator()
+        act_loeschen    = menu.addAction("🗑  Löschen")
+
+        action = menu.exec(self._psa_table.viewport().mapToGlobal(pos))
+        if action == act_bearbeiten:
+            self._psa_bearbeiten()
+        elif action == act_loeschen:
+            self._psa_loeschen()
 
     def _datei_filter_changed(self):
         """Dateitabelle nach Jahr/Monat filtern und neu befüllen."""

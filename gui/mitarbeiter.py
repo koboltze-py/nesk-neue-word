@@ -281,6 +281,8 @@ class MitarbeiterWidget(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.doubleClicked.connect(self._edit_mitarbeiter)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._kontextmenu)
         self._table.setStyleSheet("background-color: white; border-radius: 6px;")
         layout.addWidget(self._table)
 
@@ -562,6 +564,36 @@ class MitarbeiterWidget(QWidget):
             self._anwenden_filter()
         except Exception as e:
             QMessageBox.critical(self, "Fehler", str(e))
+
+    # ── Kontextmenü ────────────────────────────────────────────────────────────
+
+    def _kontextmenu(self, pos):
+        """Rechtsklick-Menü auf Mitarbeiter-Tabelle."""
+        from PySide6.QtWidgets import QMenu
+        row = self._table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._table.selectRow(row)
+
+        vollname = self._get_vollname_selected()
+        ist_ausgeschlossen = vollname in self._ausgeschlossen_set if vollname else False
+
+        menu = QMenu(self)
+        act_bearbeiten  = menu.addAction("✏️  Bearbeiten")
+        act_ausschluss  = menu.addAction(
+            "✅  Einschließen (Word-Export)" if ist_ausgeschlossen
+            else "🚫  Ausschließen (Word-Export)"
+        )
+        menu.addSeparator()
+        act_loeschen    = menu.addAction("🗑️  Löschen")
+
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if action == act_bearbeiten:
+            self._edit_mitarbeiter()
+        elif action == act_ausschluss:
+            self._toggle_ausschluss()
+        elif action == act_loeschen:
+            self._delete_mitarbeiter()
 
     # ── Excel-Import ───────────────────────────────────────────────────────────
 
