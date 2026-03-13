@@ -2508,6 +2508,13 @@ class _PatientenTab(QWidget):
             QMessageBox.information(self, "Kein Inhalt", "Keine Einträge zur Ansicht vorhanden.")
             return
 
+        # Datumszeitraum wählen
+        zeitraum_dlg = _DatumsbereichDialog(self._eintraege, self)
+        if zeitraum_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        export_eintraege = zeitraum_dlg.get_gefilterte()
+        zeitraum_lbl = zeitraum_dlg.get_zeitraum_label()
+
         ziel = None
         if ask_path:
             from PySide6.QtWidgets import QFileDialog
@@ -2524,7 +2531,11 @@ class _PatientenTab(QWidget):
                 return
 
         try:
-            pfad = export_patienten_excel(self._eintraege, ziel_pfad=ziel)
+            pfad = export_patienten_excel(
+                export_eintraege,
+                ziel_pfad=ziel,
+                titel_zeitraum=zeitraum_lbl,
+            )
         except ImportError as e:
             QMessageBox.critical(self, "Modul fehlt", str(e))
             return

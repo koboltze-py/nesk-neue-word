@@ -9,10 +9,36 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout,
     QMessageBox, QCalendarWidget, QScrollArea, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, QDate, QTime
-from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor, QTextCharFormat
+from PySide6.QtCore import Qt, QTimer, QDate, QTime, QRect
+from PySide6.QtGui import QFont, QPainter, QLinearGradient, QColor, QTextCharFormat, QBrush
 
 from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_SUCCESS, FIORI_WARNING
+
+
+class _TerminKalender(QCalendarWidget):
+    """QCalendarWidget mit kleinem farbigen Punkt für Tage mit Terminen."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._termin_dates: set[str] = set()  # 'YYYY-MM-DD'
+
+    def set_termin_dates(self, dates: set[str]):
+        self._termin_dates = dates
+        self.updateCells()
+
+    def paintCell(self, painter: QPainter, rect: QRect, date: QDate):
+        super().paintCell(painter, rect, date)
+        datum_str = date.toString("yyyy-MM-dd")
+        if datum_str in self._termin_dates:
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            dot_r = 4
+            cx = rect.center().x()
+            cy = rect.bottom() - dot_r - 2
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#1565c0")))
+            painter.drawEllipse(cx - dot_r, cy - dot_r, dot_r * 2, dot_r * 2)
+            painter.restore()
 
 
 class StatCard(QFrame):
@@ -231,7 +257,7 @@ class DashboardWidget(QWidget):
         linke.addWidget(sub)
 
         # Kalender
-        self._kalender = QCalendarWidget()
+        self._kalender = _TerminKalender()
         self._kalender.setGridVisible(True)
         self._kalender.setNavigationBarVisible(True)
         self._kalender.setMinimumHeight(280)
@@ -278,6 +304,7 @@ class DashboardWidget(QWidget):
                 color: #bbb;
             }
         """)
+        self._kalender.clicked.connect(self._kalender_tag_geklickt)
         linke.addWidget(self._kalender)
 
         # Termin-Liste
@@ -330,25 +357,6 @@ class DashboardWidget(QWidget):
         uhr_vlayout.addWidget(self._datum_lbl)
         rechte.addWidget(uhr_frame)
 
-        # Statistik-Karten
-        self._card_aktive = StatCard("Aktive Mitarbeiter",     "–", "👥", FIORI_BLUE)
-        self._card_gesamt = StatCard("Mitarbeiter gesamt",     "–", "🗂️",  "#555")
-        self._card_heute  = StatCard("Schichten heute",        "–", "📅", FIORI_SUCCESS)
-        self._card_monat  = StatCard("Schichten diesen Monat", "–", "📊", FIORI_WARNING)
-
-        grid = QGridLayout()
-        grid.setSpacing(12)
-        grid.addWidget(self._card_aktive, 0, 0)
-        grid.addWidget(self._card_gesamt, 0, 1)
-        grid.addWidget(self._card_heute,  1, 0)
-        grid.addWidget(self._card_monat,  1, 1)
-        rechte.addLayout(grid)
-
-        # Animiertes Flugzeug-Widget (Easter Egg)
-        self._flugzeug = FlugzeugWidget()
-        self._flugzeug.setToolTip("Klicken für eine wichtige Durchsage vom Flughafen Köln/Bonn ✈")
-        rechte.addWidget(self._flugzeug)
-
         # DB-Statusanzeige
         self._db_status_lbl = QLabel("🔄 Datenbankverbindung wird geprüft...")
         self._db_status_lbl.setFont(QFont("Arial", 10))
@@ -392,32 +400,41 @@ class DashboardWidget(QWidget):
         except Exception:
             return []
 
-    def _lade_statistics(self):
-        try:
-            from database.connection import db_cursor
-            with db_cursor() as cur:
-                cur.execute("SELECT COUNT(*) AS n FROM mitarbeiter WHERE status='aktiv'")
-                row = cur.fetchone()
-                self._card_aktive.set_value(str(row["n"] if row else "–"))
-            with db_cursor() as cur:
-                cur.execute("SELECT COUNT(*) AS n FROM mitarbeiter")
-                row = cur.fetchone()
-                self._card_gesamt.set_value(str(row["n"] if row else "–"))
-            with db_cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) AS n FROM dienstplan WHERE datum = date('now')"
-                )
-                row = cur.fetchone()
-                self._card_heute.set_value(str(row["n"] if row else "–"))
-            with db_cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) AS n FROM dienstplan "
-                    "WHERE strftime('%Y-%m', datum) = strftime('%Y-%m', 'now')"
-                )
-                row = cur.fetchone()
-                self._card_monat.set_value(str(row["n"] if row else "–"))
-        except Exception:
-            pass
+    # ── Kalender-Klick ────────────────────────────────────────────────────
+
+    def _kalender_tag_geklickt(self, datum: QDate):
+        datum_str = datum.toString("yyyy-MM-dd")
+        treffer = [t for t in self._termine if t.get("datum") == datum_str]
+        if not treffer:
+            return
+
+        _WOCHENTAGE = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"]
+        wd = _WOCHENTAGE[datum.dayOfWeek() - 1]
+        datum_de = f"{wd}, {datum.day():02d}.{datum.month():02d}.{datum.year()}"
+
+        zeilen = []
+        for t in treffer:
+            kz    = t.get("kennzeichen", "?")
+            typ   = t.get("fzg_typ", "") or ""
+            titel = t.get("titel", "") or t.get("typ", "")
+            uhr   = t.get("uhrzeit", "") or ""
+            beschr = t.get("beschreibung", "") or ""
+
+            zeile = f"🚗  [{kz}]"
+            if typ:
+                zeile += f"  {typ}"
+            if uhr:
+                zeile += f"  –  {uhr} Uhr"
+            zeile += f"\n    {titel}"
+            if beschr:
+                zeile += f"\n    {beschr}"
+            zeilen.append(zeile)
+
+        QMessageBox.information(
+            self,
+            f"📅  Fahrzeug-Termine – {datum_de}",
+            "\n\n".join(zeilen),
+        )
 
     # ── Kalender-Markierungen ─────────────────────────────────────────────
 
@@ -429,38 +446,73 @@ class DashboardWidget(QWidget):
             d = today.addDays(offset)
             self._kalender.setDateTextFormat(d, leer)
 
-        # Termine markieren
-        termin_fmt = QTextCharFormat()
-        termin_fmt.setBackground(QColor("#ffb74d"))
-        termin_fmt.setForeground(QColor("#7f3f00"))
-        termin_fmt.setFontWeight(700)
-
+        # ── Formate ───────────────────────────────────────────────────────
+        # Heute: kräftiges DRK-Rot, weiße Schrift, unterstrichen
         heute_fmt = QTextCharFormat()
         heute_fmt.setBackground(QColor("#C8102E"))
-        heute_fmt.setForeground(QColor("white"))
-        heute_fmt.setFontWeight(700)
+        heute_fmt.setForeground(QColor("#ffffff"))
+        heute_fmt.setFontWeight(800)
+        heute_fmt.setFontUnderline(True)
 
+        # Morgen: warmes Orange, dunkle Schrift
         morgen_fmt = QTextCharFormat()
-        morgen_fmt.setBackground(QColor("#e53935"))
-        morgen_fmt.setForeground(QColor("white"))
+        morgen_fmt.setBackground(QColor("#e65100"))
+        morgen_fmt.setForeground(QColor("#ffffff"))
         morgen_fmt.setFontWeight(700)
+        morgen_fmt.setFontItalic(True)
+
+        # Diese Woche (2–6 Tage): helles Gelb-Orange
+        soon_fmt = QTextCharFormat()
+        soon_fmt.setBackground(QColor("#fff3e0"))
+        soon_fmt.setForeground(QColor("#bf360c"))
+        soon_fmt.setFontWeight(700)
+
+        # Weiter in der Zukunft: kräftiges Grün
+        termin_fmt = QTextCharFormat()
+        termin_fmt.setBackground(QColor("#e8f5e9"))
+        termin_fmt.setForeground(QColor("#1b5e20"))
+        termin_fmt.setFontWeight(700)
 
         morgen = today.addDays(1)
+        in6    = today.addDays(6)
 
+        # Termine nach Datum gruppieren für Tooltip
+        by_date: dict[str, list] = {}
         for t in self._termine:
-            datum_str = t.get("datum", "")
-            if not datum_str:
-                continue
+            ds = t.get("datum", "")
+            if ds:
+                by_date.setdefault(ds, []).append(t)
+
+        self._kalender.set_termin_dates(set(by_date.keys()))
+
+        for datum_str, tage_termine in by_date.items():
             parts = datum_str.split("-")
             if len(parts) != 3:
                 continue
             d = QDate(int(parts[0]), int(parts[1]), int(parts[2]))
+
+            # Tooltip: alle Termine des Tages in Kurzform
+            tooltip_zeilen = []
+            for t in tage_termine:
+                kz    = t.get("kennzeichen", "?")
+                titel = t.get("titel", "") or t.get("typ", "")
+                uhr   = t.get("uhrzeit", "") or ""
+                uhr_txt = f" {uhr}" if uhr else ""
+                tooltip_zeilen.append(f"• [{kz}]{uhr_txt}  {titel}" if titel else f"• [{kz}]{uhr_txt}")
+            tooltip = "\n".join(tooltip_zeilen)
+
             if d == today:
-                self._kalender.setDateTextFormat(d, heute_fmt)
+                fmt = heute_fmt
             elif d == morgen:
-                self._kalender.setDateTextFormat(d, morgen_fmt)
+                fmt = morgen_fmt
+            elif today < d <= in6:
+                fmt = soon_fmt
             else:
-                self._kalender.setDateTextFormat(d, termin_fmt)
+                fmt = termin_fmt
+
+            fmt2 = QTextCharFormat(fmt)
+            fmt2.setToolTip(tooltip)
+            self._kalender.setDateTextFormat(d, fmt2)
 
     # ── Termin-Liste aktualisieren ────────────────────────────────────────
 
@@ -554,9 +606,6 @@ class DashboardWidget(QWidget):
                 )
         except Exception as e:
             self._db_status_lbl.setText(f"❌ Fehler: {e}")
-
-        # Statistiken laden
-        self._lade_statistics()
 
         # Fahrzeug-Termine laden
         self._termine = self._lade_fahrzeug_termine()

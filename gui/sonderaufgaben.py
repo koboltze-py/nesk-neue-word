@@ -760,28 +760,48 @@ class SonderaufgabenWidget(QWidget):
             except Exception:
                 pass
 
-            # Aufgaben-Zeilen schreiben
+            # Alle beschreibbaren Zellen zuerst leeren, damit Template-Werte
+            # nicht stehen bleiben wenn die GUI-Felder leer sind
+            # MergedCell-Objekte (Slave-Zellen) überspringen – diese sind read-only
+            from openpyxl.cell.cell import MergedCell as _MergedCell
+
+            def _clear(row, col):
+                c = ws.cell(row=row, column=col)
+                if not isinstance(c, _MergedCell):
+                    c.value = None
+
+            for _excel_row in _AUFGABEN_MAPPING.values():
+                for _col in (3, 4, 5, 6):
+                    _clear(_excel_row, _col)
+            for _row, _col in _SERVICE_MAPPING.values():
+                _clear(_row, _col)
+            _clear(11, 1)
+
+            # Aufgaben-Zeilen schreiben (leer = Zelle löschen, damit keine alten Werte stehen bleiben)
             for aufgabe, excel_row in _AUFGABEN_MAPPING.items():
                 for schicht, col in (("tag", 3), ("nacht", 5)):
                     key = f"{aufgabe}_{schicht}"
                     entry = self._entries.get(key)
                     if entry:
                         val = entry["line"].text().strip()
-                        if val:
-                            ws.cell(row=excel_row, column=col, value=val)
+                        _c = ws.cell(row=excel_row, column=col)
+                        if not isinstance(_c, _MergedCell):
+                            _c.value = val if val else None
 
             # Service Point C72 schreiben
             for key, (row, col) in _SERVICE_MAPPING.items():
                 entry = self._entries.get(key)
                 if entry:
                     val = entry["line"].text().strip()
-                    if val:
-                        ws.cell(row=row, column=col, value=val)
+                    _c = ws.cell(row=row, column=col)
+                    if not isinstance(_c, _MergedCell):
+                        _c.value = val if val else None
 
             # Bemerkung schreiben
             bemerkung = self._bemerkung.toPlainText().strip()
-            if bemerkung:
-                ws.cell(row=11, column=1, value=bemerkung)
+            _c = ws.cell(row=11, column=1)
+            if not isinstance(_c, _MergedCell):
+                _c.value = bemerkung if bemerkung else None
 
             wb.save(str(output_path))
             self.reload_tree()   # Baum nach Speichern aktualisieren

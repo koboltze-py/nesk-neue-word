@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QLineEdit, QTextEdit, QComboBox, QDateEdit,
     QMessageBox, QFrame, QScrollArea, QSizePolicy, QInputDialog,
     QFileDialog, QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
-    QTimeEdit, QTabWidget
+    QTimeEdit, QTabWidget, QSpinBox
 )
 from PySide6.QtCore import Qt, QDate, QSize, QTime
 from PySide6.QtGui import QFont, QColor, QIcon
@@ -41,6 +41,8 @@ from functions.mitarbeiter_dokumente_functions import (
     loesche_dokument,
     umbenennen_dokument,
     sicherungsordner,
+    erstelle_dienstanweisung_freitext,
+    dienstanweisung_text_passt,
 )
 from functions.stellungnahmen_db import (
     lade_alle as db_lade_alle,
@@ -1175,6 +1177,12 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._btn_psa.clicked.connect(self._psa_erfassen)
         btn_row.addWidget(self._btn_psa)
 
+        self._btn_word_druck = _btn("🖨️  Dienstanweisung erstellen", "#1565a8", "#0d47a1")
+        self._btn_word_druck.setToolTip("Neue Dienstanweisung als Freitext erstellen – Ausrichtung und Schriftgröße wählbar")
+        self._btn_word_druck.setVisible(False)
+        self._btn_word_druck.clicked.connect(self._dienstanweisung_word_druck)
+        btn_row.addWidget(self._btn_word_druck)
+
         btn_row.addStretch()
         outer.addLayout(btn_row)
 
@@ -2103,12 +2111,14 @@ class MitarbeiterDokumenteWidget(QWidget):
         is_versp  = (kategorie == "Verspätung")
         is_psa    = (kategorie == "PSA")
         is_antrag = (kategorie == "Bescheinigungen und Anträge")
+        is_dienstanw = (kategorie == "Dienstanweisungen")
         self._btn_stellungnahme.setVisible(is_stell)
         self._btn_web.setVisible(is_stell)
         self._tabs.setTabVisible(1, is_stell)
         self._btn_verspaetung.setVisible(is_versp)
         self._btn_psa.setVisible(is_psa)
-        self._btn_neu.setVisible(not is_versp and not is_psa and not is_stell and not is_antrag)
+        self._btn_word_druck.setVisible(is_dienstanw)
+        self._btn_neu.setVisible(not is_versp and not is_psa and not is_stell and not is_antrag and not is_dienstanw)
         self._tabs.setTabVisible(0, not is_versp and not is_psa)  # Dateien-Tab ausblenden
         self._tabs.setTabVisible(2, is_versp)
         self._tabs.setTabVisible(3, is_psa)
@@ -2757,3 +2767,143 @@ class MitarbeiterDokumenteWidget(QWidget):
                 self.refresh()
             except Exception as e:
                 QMessageBox.critical(self, "Fehler beim Umbenennen", str(e))
+
+    # ── Word-Ausdruck Dienstanweisung (Freitext) ───────────────────────────
+
+    def _dienstanweisung_word_druck(self):
+        """Freitext-Dienstanweisung erstellen, in Word öffnen."""
+        dlg = _DienstanweisungFreitextDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            pfad = erstelle_dienstanweisung_freitext(
+                dlg.get_titel(),
+                dlg.get_inhalt(),
+                dlg.ausrichtung(),
+                dlg.schriftgroesse(),
+            )
+            import subprocess
+            subprocess.Popen(["start", "", pfad], shell=True)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", str(exc))
+
+
+class _DienstanweisungFreitextDialog(QDialog):
+    """Dialog zum Erstellen einer Dienstanweisung als Freitext."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Neue Dienstanweisung erstellen")
+        self.setMinimumSize(600, 580)
+        self._build_ui()
+        self._aktualisiere_fit()
+
+    def _build_ui(self):
+        vl = QVBoxLayout(self)
+        vl.setSpacing(10)
+        vl.setContentsMargins(16, 14, 16, 14)
+
+        # Kopfzeile
+        kopf = QLabel("🖨️  Neue Dienstanweisung")
+        kopf.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        kopf.setStyleSheet("color:#1565a8;")
+        vl.addWidget(kopf)
+
+        # Formular: Titel + Formatierung
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self._edit_titel = QLineEdit()
+        self._edit_titel.setPlaceholderText("z. B.  Verhalten am Flugsteig")
+        self._edit_titel.textChanged.connect(self._aktualisiere_fit)
+        form.addRow("Titel:", self._edit_titel)
+
+        self._combo_ausrichtung = QComboBox()
+        self._combo_ausrichtung.addItem("Hochformat A4", "hoch")
+        self._combo_ausrichtung.addItem("Querformat A4", "quer")
+        self._combo_ausrichtung.currentIndexChanged.connect(self._aktualisiere_fit)
+        form.addRow("Ausrichtung:", self._combo_ausrichtung)
+
+        self._spin_groesse = QSpinBox()
+        self._spin_groesse.setRange(8, 20)
+        self._spin_groesse.setValue(11)
+        self._spin_groesse.setSuffix(" pt")
+        self._spin_groesse.valueChanged.connect(self._aktualisiere_fit)
+        form.addRow("Schriftgröße:", self._spin_groesse)
+
+        vl.addLayout(form)
+
+        # Textfeld
+        lbl_text = QLabel("Inhalt der Dienstanweisung:")
+        lbl_text.setStyleSheet("font-weight:bold; font-size:12px;")
+        vl.addWidget(lbl_text)
+
+        self._edit_inhalt = QTextEdit()
+        self._edit_inhalt.setPlaceholderText(
+            "Text hier eingeben ...\n"
+            "Jede neue Zeile wird als eigener Absatz übernommen."
+        )
+        self._edit_inhalt.setMinimumHeight(220)
+        self._edit_inhalt.textChanged.connect(self._aktualisiere_fit)
+        vl.addWidget(self._edit_inhalt, stretch=1)
+
+        # A4-Passt-Anzeige
+        self._lbl_fit = QLabel()
+        self._lbl_fit.setWordWrap(True)
+        self._lbl_fit.setStyleSheet(
+            "background:#f5f5f5; border:1px solid #ddd; "
+            "border-radius:4px; padding:7px; font-size:12px;"
+        )
+        vl.addWidget(self._lbl_fit)
+
+        # Hinweis
+        hint = QLabel(
+            "Word wird vor dem Drucken geöffnet. "
+            "Das Dokument wird in 'Dienstanweisungen' gespeichert."
+        )
+        hint.setStyleSheet("color:#666; font-size:11px;")
+        hint.setWordWrap(True)
+        vl.addWidget(hint)
+
+        # Buttons
+        btns = QHBoxLayout()
+        ok_btn = QPushButton("✅  In Word öffnen")
+        ok_btn.setStyleSheet(
+            "background:#1565a8; color:white; font-weight:bold; "
+            "padding:7px 18px; border-radius:5px; font-size:12px;"
+        )
+        ok_btn.clicked.connect(self.accept)
+        ab_btn = QPushButton("Abbrechen")
+        ab_btn.setStyleSheet("padding:7px 14px; border-radius:5px; font-size:12px;")
+        ab_btn.clicked.connect(self.reject)
+        btns.addStretch()
+        btns.addWidget(ok_btn)
+        btns.addWidget(ab_btn)
+        vl.addLayout(btns)
+
+    def _aktualisiere_fit(self):
+        text = self._edit_inhalt.toPlainText()
+        passt, hinweis, _, _ = dienstanweisung_text_passt(
+            text,
+            self.ausrichtung(),
+            self.schriftgroesse(),
+        )
+        farbe = "#1b5e20" if passt else "#b71c1c"
+        self._lbl_fit.setStyleSheet(
+            f"background:#f5f5f5; border:1px solid #ddd; "
+            f"border-radius:4px; padding:7px; font-size:12px; color:{farbe};"
+        )
+        self._lbl_fit.setText(hinweis)
+
+    def get_titel(self) -> str:
+        return self._edit_titel.text().strip()
+
+    def get_inhalt(self) -> str:
+        return self._edit_inhalt.toPlainText()
+
+    def ausrichtung(self) -> str:
+        return self._combo_ausrichtung.currentData()
+
+    def schriftgroesse(self) -> int:
+        return self._spin_groesse.value()

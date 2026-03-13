@@ -7,6 +7,10 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from functions.stellungnahmen_db import eintrag_speichern as _db_eintrag_speichern
+try:
+    from functions.dienstanweisungen_db import eintrag_speichern as _da_db_speichern
+except Exception:
+    _da_db_speichern = None  # DB nicht verfügbar – kein Fehler
 from config import BASE_DIR
 
 # Pfad zur Vorlage mit Kopf-/Fußzeile
@@ -362,3 +366,119 @@ def erstelle_stellungnahme(daten: dict) -> tuple[str, str]:
     except Exception:
         pass  # DB-Fehler soll kein Dokument-Erstellen blockieren
     return intern_pfad, extern_pfad
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Dienstanweisung – Freitext-Erstellung mit Formatwahl
+# ══════════════════════════════════════════════════════════════════════════════
+
+def dienstanweisung_text_passt(
+    text: str,
+    ausrichtung: str = "hoch",
+    schriftgroesse: int = 11,
+) -> tuple[bool, str, int, int]:
+    """
+    Prüft anhand des eingegebenen Textes (Freitext), ob er auf eine A4-Seite passt.
+    Gibt zurück: (passt: bool, hinweis: str, gesamt_zeilen: int, zeilen_pro_seite: int)
+    """
+    import math
+    # A4 in Punkten: 595 × 842 pt
+    A4_W, A4_H = 595.0, 842.0
+    MARGIN_TB = 72.0   # 2.54 cm oben/unten
+    MARGIN_LR = 90.0   # 3.17 cm links/rechts
+
+    if ausrichtung == "quer":
+        usable_w = A4_H - 2 * MARGIN_LR
+        usable_h = A4_W - 2 * MARGIN_TB
+    else:
+        usable_w = A4_W - 2 * MARGIN_LR
+        usable_h = A4_H - 2 * MARGIN_TB
+
+    char_w = schriftgroesse * 0.5
+    chars_per_line = max(1, int(usable_w / char_w))
+    line_h = schriftgroesse * 1.5
+    lines_per_page = max(1, int(usable_h / line_h))
+
+    # Titelzeile + Leerzeile
+    EXTRA_ZEILEN = 2
+    gesamt_zeilen = EXTRA_ZEILEN
+    for zeile in (text or "").split("\n"):
+        if not zeile:
+            gesamt_zeilen += 1
+        else:
+            gesamt_zeilen += math.ceil(len(zeile) / chars_per_line)
+
+    passt = gesamt_zeilen <= lines_per_page
+    if passt:
+        hinweis = (
+            f"✅  Text passt auf eine A4-Seite  "
+            f"({gesamt_zeilen} / {lines_per_page} Zeilen)"
+        )
+    else:
+        seiten = math.ceil(gesamt_zeilen / lines_per_page)
+        hinweis = (
+            f"⚠️  Text benötigt ca. {seiten} Seiten  "
+            f"({gesamt_zeilen} Zeilen, max. {lines_per_page} pro Seite)"
+        )
+    return passt, hinweis, gesamt_zeilen, lines_per_page
+
+
+def erstelle_dienstanweisung_freitext(
+    titel: str,
+    inhalt: str,
+    ausrichtung: str = "hoch",
+    schriftgroesse: int = 11,
+) -> str:
+    """
+    Erstellt eine neue Dienstanweisung als Word-Dokument aus freiem Text.
+    Verwendet die DRK-Vorlage (Kopf-/Fußzeile), setzt Ausrichtung und Schriftgröße.
+    Speichert unter Daten/Mitarbeiterdokumente/Dienstanweisungen/ und gibt den Pfad zurück.
+    """
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from docx.enum.section import WD_ORIENT
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except ImportError:
+        raise RuntimeError("python-docx ist nicht installiert.")
+
+    sicherungsordner()
+
+    safe_titel = "".join(c for c in (titel or "Dienstanweisung")
+                         if c.isalnum() or c in " _-").strip()[:40]
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dateiname = f"DA_{safe_titel}_{stamp}.docx"
+    ziel_pfad = os.path.join(DOKUMENTE_BASIS, "Dienstanweisungen", dateiname)
+
+    # Leeres Dokument – keine Kopf-/Fußzeile aus Vorlage
+    doc = Document()
+
+    # Seitenausrichtung
+    section = doc.sections[0]
+    if ausrichtung == "quer":
+        section.orientation = WD_ORIENT.LANDSCAPE
+        new_w = max(section.page_width, section.page_height)
+        new_h = min(section.page_width, section.page_height)
+    else:
+        section.orientation = WD_ORIENT.PORTRAIT
+        new_w = min(section.page_width, section.page_height)
+        new_h = max(section.page_width, section.page_height)
+    section.page_width  = new_w
+    section.page_height = new_h
+
+    # Titel
+    p_titel = doc.add_paragraph()
+    run_titel = p_titel.add_run(titel or "Dienstanweisung")
+    run_titel.bold = True
+    run_titel.font.size = Pt(schriftgroesse + 4)
+    p_titel.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+
+    # Inhalt – jede Zeile als eigener Absatz
+    for zeile in (inhalt or "").split("\n"):
+        p = doc.add_paragraph(zeile)
+        for run in p.runs:
+            run.font.size = Pt(schriftgroesse)
+
+    doc.save(ziel_pfad)
+    return ziel_pfad

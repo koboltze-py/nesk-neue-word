@@ -154,6 +154,7 @@ class UebergabeWidget(QWidget):
         self._handy_eintraege_widgets: list = []  # list of (nr_edit, notiz_edit)
         self._verspaetungen_widgets: list = []   # list of (name_edit, soll_edit, ist_edit)
         self._verspaetungen_db_entries: list = []  # auto-geladene DB-Einträge (verspaetungen.db)
+        self._einsaetze_db_entries: list = []     # auto-geladene Einsätze für den Tag
         self._build_ui()
         self.refresh()
 
@@ -507,6 +508,42 @@ class UebergabeWidget(QWidget):
         _vsp_btn_row.addStretch()
         layout.addLayout(_vsp_btn_row)
 
+        # Einsätze
+        layout.addWidget(self._section_label("🚑 Einsätze"))
+        self._einsaetze_section = QFrame()
+        self._einsaetze_section.setStyleSheet("QFrame { border: none; }")
+        self._einsaetze_section_layout = QVBoxLayout(self._einsaetze_section)
+        self._einsaetze_section_layout.setContentsMargins(0, 0, 0, 0)
+        self._einsaetze_section_layout.setSpacing(4)
+        _einz_hint = QLabel("✅ Keine Einsätze für diesen Tag – ➕ hinzufügen")
+        _einz_hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
+        self._einsaetze_section_layout.addWidget(_einz_hint)
+        layout.addWidget(self._einsaetze_section)
+        _einz_btn_row = QHBoxLayout()
+        _einz_btn_row.setSpacing(6)
+        self._btn_add_einsatz = QPushButton("🚑 Neuen Einsatz erfassen")
+        self._btn_add_einsatz.setFixedHeight(28)
+        self._btn_add_einsatz.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_add_einsatz.setStyleSheet(
+            "QPushButton{background:#e8f5e9;border:1px solid #80c880;"
+            "border-radius:4px;padding:2px 10px;color:#256029;font-size:11px;}"
+            "QPushButton:hover{background:#c8eac8;}"
+        )
+        self._btn_add_einsatz.clicked.connect(self._manuell_einsatz_erfassen)
+        self._btn_pick_einsatz_db = QPushButton("📋 Aus Einsätzen wählen")
+        self._btn_pick_einsatz_db.setFixedHeight(28)
+        self._btn_pick_einsatz_db.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_pick_einsatz_db.setStyleSheet(
+            "QPushButton{background:#f0e8ff;border:1px solid #b090e0;"
+            "border-radius:4px;padding:2px 10px;color:#5a2d8a;font-size:11px;}"
+            "QPushButton:hover{background:#e0d0ff;}"
+        )
+        self._btn_pick_einsatz_db.clicked.connect(self._pick_from_einsaetze_db)
+        _einz_btn_row.addWidget(self._btn_add_einsatz)
+        _einz_btn_row.addWidget(self._btn_pick_einsatz_db)
+        _einz_btn_row.addStretch()
+        layout.addLayout(_einz_btn_row)
+
         # Übergabe-Notiz
         layout.addWidget(self._section_label("📝 Übergabe-Notiz (für die Folgeschicht)"))
         self._f_notiz = QTextEdit()
@@ -761,6 +798,7 @@ class UebergabeWidget(QWidget):
         self._rebuild_fahrzeug_section(protokoll_id)
         self._rebuild_handy_section(protokoll_id)
         self._rebuild_verspaetungen_section(protokoll_id)
+        self._rebuild_einsaetze_section()
 
         abges = (status == "abgeschlossen")
         self._btn_speichern.setEnabled(not abges)
@@ -771,7 +809,8 @@ class UebergabeWidget(QWidget):
         for w in [self._f_datum, self._f_beginn, self._f_ende,
                   self._f_patienten, self._f_ersteller, self._f_abzeichner,
                   self._f_ereignisse, self._f_notiz, self._btn_add_handy,
-                  self._btn_add_verspaetung]:
+                  self._btn_add_verspaetung, self._btn_add_einsatz,
+                  self._btn_pick_einsatz_db]:
             w.setEnabled(not abges)
         for w in self._fahrzeug_notiz_widgets.values():
             w.setEnabled(not abges)
@@ -798,11 +837,13 @@ class UebergabeWidget(QWidget):
         self._form_titel.setStyleSheet(f"color: {farbe};")
 
         # Felder leeren + Zeiten je nach Diensttyp vorbelegen
-        self._f_datum.setDate(QDate.currentDate())
         if typ == "tagdienst":
+            self._f_datum.setDate(QDate.currentDate())
             self._f_beginn.setText("07:00")
             self._f_ende.setText("19:00")
         else:
+            # Nachtdienst: Datum auf gestern setzen (Schicht beginnt am Vortag)
+            self._f_datum.setDate(QDate.currentDate().addDays(-1))
             self._f_beginn.setText("19:00")
             self._f_ende.setText("07:00")
         self._f_patienten.setValue(0)
@@ -1012,6 +1053,193 @@ class UebergabeWidget(QWidget):
             hint = QLabel("✅ Keine Verspätungen eingetragen – ➕ hinzufügen")
             hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
             self._verspaetungen_section_layout.addWidget(hint)
+
+    def _rebuild_einsaetze_section(self, _protokoll_id=None):
+        """Baut die Einsätze-Liste im Formular neu auf (lädt für aktuelles Protokolldatum).
+        Bei Nachtdienst-Protokollen werden auch Einsätze des Folgetages bis 07:30 angezeigt."""
+        while self._einsaetze_section_layout.count():
+            item = self._einsaetze_section_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._einsaetze_db_entries = []
+        try:
+            from gui.dienstliches import lade_einsaetze as _lade_einsaetze
+            datum_dd = self._f_datum.date().toString("dd.MM.yyyy")
+            alle_einz = [e for e in _lade_einsaetze() if e.get("datum", "") == datum_dd]
+
+            # Nachtdienst: auch Einsätze des Folgetages bis 07:30 einschließen
+            if self._aktueller_typ == "nachtdienst":
+                from PySide6.QtCore import QDate as _QDate
+                folgetag = self._f_datum.date().addDays(1).toString("dd.MM.yyyy")
+                _GRENZE = "07:30"
+                for e in _lade_einsaetze():
+                    if e.get("datum", "") == folgetag:
+                        uhr = e.get("uhrzeit", "") or ""
+                        if uhr <= _GRENZE:
+                            alle_einz.append(e)
+        except Exception:
+            alle_einz = []
+        self._einsaetze_db_entries = list(alle_einz)
+        if alle_einz:
+            for e in alle_einz:
+                self._add_einsatz_row(e)
+        else:
+            hint = QLabel("✅ Keine Einsätze für diesen Tag – ➕ hinzufügen")
+            hint.setStyleSheet("color: #aaa; font-size: 10px; border: none;")
+            self._einsaetze_section_layout.addWidget(hint)
+
+    def _add_einsatz_row(self, e: dict):
+        """Zeigt einen Einsatz als schreibgeschützte Zeile an."""
+        row_frame = QFrame()
+        ang = bool(e.get("angenommen", 1))
+        if ang:
+            row_frame.setStyleSheet(
+                "QFrame{background:#e8f5e9;border:1px solid #80c080;border-radius:4px;}"
+            )
+        else:
+            row_frame.setStyleSheet(
+                "QFrame{background:#ffebee;border:1px solid #e08080;border-radius:4px;}"
+            )
+        row_layout = QHBoxLayout(row_frame)
+        row_layout.setContentsMargins(6, 4, 6, 4)
+        row_layout.setSpacing(8)
+
+        ang_txt = "✅" if ang else "❌"
+        uhr   = e.get("uhrzeit", "") or "—"
+        stw   = e.get("einsatzstichwort", "") or "—"
+        ort   = e.get("einsatzort", "") or "—"
+        dauer = e.get("einsatzdauer", 0) or 0
+        ma1   = e.get("drk_ma1", "") or ""
+        ma2   = e.get("drk_ma2", "") or ""
+        nr    = e.get("einsatznr_drk", "") or ""
+
+        main_lbl = QLabel(f"{ang_txt} {uhr}  |  {stw}  |  {ort}")
+        main_lbl.setStyleSheet("border:none;font-size:11px;font-weight:bold;")
+
+        info_parts = []
+        if dauer:
+            info_parts.append(f"Dauer: {dauer} Min.")
+        if ma1 or ma2:
+            info_parts.append(f"MA: {', '.join(filter(None, [ma1, ma2]))}")
+        if nr:
+            info_parts.append(f"Nr.: {nr}")
+        fg_color = "#256029" if ang else "#a00000"
+        info_lbl = QLabel("  ".join(info_parts))
+        info_lbl.setStyleSheet(f"border:none;font-size:10px;color:{fg_color};")
+
+        badge_bg = "#107e3e" if ang else "#c62828"
+        src_lbl = QLabel("🚑 Einsätze")
+        src_lbl.setStyleSheet(
+            f"border:none;font-size:9px;color:#fff;background:{badge_bg};"
+            "border-radius:3px;padding:1px 5px;"
+        )
+
+        hide_btn = QPushButton("✕")
+        hide_btn.setFixedSize(22, 22)
+        hide_btn.setToolTip("Aus dieser Ansicht ausblenden (Eintrag bleibt in der Datenbank)")
+        hide_btn.setStyleSheet(
+            "QPushButton{background:#eee;border:none;border-radius:3px;"
+            "color:#a00;font-weight:bold;font-size:11px;}"
+            "QPushButton:hover{background:#ffcccc;}"
+        )
+        hide_btn.clicked.connect(lambda: (row_frame.setParent(None), row_frame.deleteLater()))
+        row_layout.addWidget(main_lbl)
+        row_layout.addWidget(info_lbl)
+        row_layout.addStretch()
+        row_layout.addWidget(src_lbl)
+        row_layout.addWidget(hide_btn)
+        self._einsaetze_section_layout.addWidget(row_frame)
+
+    def _manuell_einsatz_erfassen(self):
+        """Neuen Einsatz über den vollen Einsatz-Dialog erfassen und in einsaetze.db speichern."""
+        try:
+            from gui.dienstliches import _EinsatzDialog, einsatz_speichern
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", f"Modul nicht verfügbar:\n{exc}")
+            return
+        dlg = _EinsatzDialog(parent=self)
+        # Datum des aktuellen Protokolls vorbelegen
+        dlg._datum.setDate(self._f_datum.date())
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            try:
+                einsatz_speichern(dlg.get_daten())
+            except Exception as exc:
+                QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern:\n{exc}")
+                return
+            self._rebuild_einsaetze_section()
+
+    def _pick_from_einsaetze_db(self):
+        """Öffnet einen Dialog zur Auswahl eines vorhandenen Einsatzes aus der DB."""
+        try:
+            from gui.dienstliches import lade_einsaetze as _lade_einsaetze
+            alle = list(reversed(_lade_einsaetze()))  # neueste zuerst
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Laden:\n{exc}")
+            return
+        if not alle:
+            QMessageBox.information(self, "Keine Einsätze", "Es sind noch keine Einsätze erfasst.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Einsatz aus Datenbank wählen")
+        dlg.setMinimumWidth(540)
+        dlg.setMinimumHeight(420)
+        dlg.setStyleSheet("background: white;")
+        vlay = QVBoxLayout(dlg)
+        vlay.setSpacing(8)
+        vlay.setContentsMargins(12, 12, 12, 12)
+
+        hint_lbl = QLabel("Einsatz auswählen (Doppelklick oder OK):")
+        hint_lbl.setStyleSheet("color: #333; font-size: 11px;")
+        vlay.addWidget(hint_lbl)
+
+        search = QLineEdit()
+        search.setPlaceholderText("🔍 Datum, Stichwort, Ort suchen …")
+        search.setStyleSheet(
+            "border: 1px solid #ccc; border-radius: 3px; padding: 4px 8px; font-size: 11px;"
+        )
+        vlay.addWidget(search)
+
+        lst = QListWidget()
+        lst.setStyleSheet("border: 1px solid #ccc; border-radius: 3px; font-size: 11px;")
+        for e in alle:
+            ang = "✅" if e.get("angenommen") else "❌"
+            lst.addItem(
+                f"{e.get('datum','')}  {e.get('uhrzeit','')}  "
+                f"{ang}  {e.get('einsatzstichwort','') or '—'}  |  "
+                f"{e.get('einsatzort','') or '—'}"
+            )
+
+        def _filter(text):
+            t = text.lower()
+            for i in range(lst.count()):
+                lst.item(i).setHidden(t not in lst.item(i).text().lower())
+        search.textChanged.connect(_filter)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lst.itemDoubleClicked.connect(lambda _: dlg.accept())
+        vlay.addWidget(lst, 1)
+        vlay.addWidget(btns)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            row = lst.currentRow()
+            if 0 <= row < len(alle):
+                e = alle[row]
+                datum_dd = self._f_datum.date().toString("dd.MM.yyyy")
+                if e.get("datum", "") != datum_dd:
+                    antwort = QMessageBox.question(
+                        self, "Anderes Datum",
+                        f"Der Einsatz ist vom {e.get('datum','')} – "
+                        f"aktuelles Protokolldatum: {datum_dd}.\nTrotzdem anzeigen?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                    if antwort != QMessageBox.StandardButton.Yes:
+                        return
+                self._add_einsatz_row(e)
 
     def _pick_mitarbeiter_from_db(self):
         """Öffnet einen Dialog zur Auswahl eines Mitarbeiters aus der DB."""
@@ -1755,11 +1983,16 @@ class UebergabeWidget(QWidget):
         try:
             from gui.dienstliches import lade_einsaetze as _lade_einsaetze
             _datum_dd = self._f_datum.date().toString("dd.MM.yyyy")
-            _einsatz_parts = _datum_dd.split(".")
             alle_einsaetze = [
                 e for e in _lade_einsaetze()
                 if e.get("datum", "") == _datum_dd
             ]
+            # Nachtdienst: auch Einsätze des Folgetages bis 07:30 einschließen
+            if self._aktueller_typ == "nachtdienst":
+                _folgetag = self._f_datum.date().addDays(1).toString("dd.MM.yyyy")
+                for e in _lade_einsaetze():
+                    if e.get("datum", "") == _folgetag and (e.get("uhrzeit", "") or "") <= "07:30":
+                        alle_einsaetze.append(e)
         except Exception:
             alle_einsaetze = []
 
@@ -2432,5 +2665,7 @@ class UebergabeWidget(QWidget):
         # sichtbar werden wenn man von einem anderen Tab zurückkommt
         if self._aktives_protokoll_id is not None:
             self._rebuild_verspaetungen_section(self._aktives_protokoll_id)
+            self._rebuild_einsaetze_section()
         elif self._ist_neu:
             self._rebuild_verspaetungen_section(None)
+            self._rebuild_einsaetze_section()
