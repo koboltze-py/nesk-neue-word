@@ -1,58 +1,46 @@
 ﻿"""
 Ladebildschirm (Splash Screen) - Moderne Variante
-- grosses Logo zentriert
-- rotierender Teal-Ring um das Logo
-- pulsierender Glow-Ring (Opacity-Animation)
-- "NeSk" Schriftzug mit wanderndem Lichteffekt
-- Statuszeile am unteren Rand
+- rotierender Teal-Ring + gegenlaeuftiger Gold-Ring (doppelter Spinner)
+- pulsierender Glow in der Mitte
+- "NeSk" Schriftzug mit wanderndem Shimmer
+- Animation laeuft via time.monotonic() - kein Event-Loop noetig
 """
-import os, sys, math
+import os, sys, math, time
 
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore    import Qt, QTimer, QRectF, QPointF
 from PySide6.QtGui     import (
-    QColor, QPainter, QPen, QPixmap, QIcon,
-    QLinearGradient, QRadialGradient, QBrush, QFont, QFontMetricsF,
-    QConicalGradient,
+    QColor, QPainter, QPen, QPixmap, QBrush, QFont, QFontMetricsF,
+    QLinearGradient, QRadialGradient,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---------------------------------------------------------------------------
-# Farbpalette (Logo-Farben)
+# Farbpalette
 # ---------------------------------------------------------------------------
-_BG        = QColor("#131E28")   # sehr tiefer Hintergrund
-_RING1     = QColor("#5B8AAA")   # Teal-Blau (rotierender Ring)
-_RING2     = QColor("#C0944A")   # Gold-Amber (zweiter Ring, gegenlaeutig)
-_GLOW      = QColor(91, 138, 170, 60)   # Teal mit Alpha fuer Glow
-_WHITE     = QColor("#ECEFF4")
-_SUBTEXT   = QColor("#5B8AAA")
-_GRAY      = QColor("#4A6880")
-_LOGO_BG   = QColor("#1C2B38")   # Kreis hinter dem Logo
+_BG      = QColor("#0F1D28")
+_RING1   = QColor("#5B8AAA")     # Teal  - groesserer Ring
+_RING2   = QColor("#C0944A")     # Gold  - kleinerer Gegenring
+_GLOW    = QColor(91, 138, 170)  # Teal fuer Glow
+_WHITE   = QColor("#E8EFF5")
+_ACCENT  = QColor("#5B8AAA")
+_GRAY    = QColor(74, 104, 128)
 
 
 class SplashScreen(QWidget):
     """
-    Frameless moderner Splash Screen.
-    Alles wird in paintEvent() gezeichnet - kein Layout, pure QPainter.
-
-    Aufruf:
-        splash = SplashScreen()
-        splash.show();  QApplication.processEvents()
-        splash.set_status("...")
-        splash.finish()
+    Frameless moderner Splash Screen - alles via QPainter.
+    Animation laeuft durch time.monotonic(); set_status() pumpt Events.
     """
 
-    W, H = 540, 360
+    W, H = 480, 340
 
     def __init__(self, version=""):
         super().__init__()
-        self._version   = version
-        self._angle1    = 0.0      # Winkel rotierender Ring 1 (Grad)
-        self._angle2    = 180.0    # Ring 2 startet versetzt
-        self._pulse     = 0.0      # 0..2pi fuer sin-Glow
-        self._shimmer   = -0.4     # 0..1 Position des Lichtstreifens auf "NeSk"
-        self._status    = "Wird gestartet \u2026"
+        self._version    = version
+        self._status     = "Wird gestartet \u2026"
+        self._t0         = time.monotonic()
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -61,18 +49,6 @@ class SplashScreen(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setFixedSize(self.W, self.H)
-
-        # Logo laden
-        icon_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "Daten", "Logo", "nesk3.ico",
-        )
-        self._logo_px = None
-        if os.path.exists(icon_path):
-            icon = QIcon(icon_path)
-            px   = icon.pixmap(120, 120)
-            if not px.isNull():
-                self._logo_px = px
 
         # Zentrieren
         screen = QApplication.primaryScreen()
@@ -83,119 +59,104 @@ class SplashScreen(QWidget):
                 geo.center().y() - self.H // 2,
             )
 
-        # Timer ~60 fps
+        # Timer fuer Neuzeichnen auch wenn set_status nicht gerufen wird
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        self._timer.timeout.connect(self.update)
         self._timer.start(16)
 
     # ------------------------------------------------------------------
-    def _tick(self):
-        self._angle1  = (self._angle1 + 1.4) % 360
-        self._angle2  = (self._angle2 - 0.9) % 360
-        self._pulse  += 0.045
-        self._shimmer += 0.009
-        if self._shimmer > 1.4:
-            self._shimmer = -0.4
-        self.update()
-
-    # ------------------------------------------------------------------
     def paintEvent(self, event):
+        t  = time.monotonic() - self._t0    # Sekunden seit Start
+        W, H = float(self.W), float(self.H)
+
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-        W, H = float(self.W), float(self.H)
+        # ── Hintergrund (radialer Gradient) ───────────────────────────────
+        bg = QRadialGradient(W / 2, H * 0.44, W * 0.58)
+        bg.setColorAt(0.0, QColor("#182634"))
+        bg.setColorAt(1.0, QColor("#0A1520"))
+        p.fillRect(0, 0, int(W), int(H), QBrush(bg))
 
-        # ── Hintergrund ──────────────────────────────────────────────────
-        # radialer Gradient von Mitte nach aussen: etwas heller in der Mitte
-        bg_grad = QRadialGradient(W / 2, H * 0.42, W * 0.55)
-        bg_grad.setColorAt(0.0, QColor("#1E3040"))
-        bg_grad.setColorAt(1.0, QColor("#0E1820"))
-        p.fillRect(0, 0, int(W), int(H), QBrush(bg_grad))
-
-        # ── Goldener Streifen oben ────────────────────────────────────────
+        # Goldstreifen oben
         p.fillRect(0, 0, int(W), 3, QBrush(QColor("#C0944A")))
 
-        # ── Logo-Bereich (Mitte oben) ─────────────────────────────────────
+        # ── Spinner / Ring-Zone ───────────────────────────────────────────
         cx, cy = W / 2, H * 0.40
-        logo_r = 68.0        # Radius des Logo-Kreises
 
-        # Glow-Ring (pulsierend)
-        glow_alpha = int(30 + 25 * math.sin(self._pulse))
-        glow_r = logo_r + 22
-        glow_grad = QRadialGradient(cx, cy, glow_r)
-        glow_grad.setColorAt(0.70, QColor(91, 138, 170, glow_alpha))
-        glow_grad.setColorAt(1.00, QColor(91, 138, 170, 0))
+        # Winkel aus Echtzeit (unabhaengig vom Event-Loop)
+        ang1 = (t * 120.0) % 360.0           # 120 Grad/s vorwaerts
+        ang2 = (180.0 - t * 75.0) % 360.0    # 75 Grad/s rueckwaerts
+
+        # Pulsierender Glow
+        glow_alpha = int(18 + 14 * math.sin(t * 2.2))
+        glow_r     = 48.0
+        glow_grad  = QRadialGradient(cx, cy, glow_r + 20)
+        glow_grad.setColorAt(0.0, QColor(91, 138, 170, glow_alpha * 2))
+        glow_grad.setColorAt(0.6, QColor(91, 138, 170, glow_alpha))
+        glow_grad.setColorAt(1.0, QColor(91, 138, 170, 0))
         p.setBrush(QBrush(glow_grad))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QRectF(cx - glow_r, cy - glow_r, glow_r * 2, glow_r * 2))
+        p.drawEllipse(QRectF(cx - glow_r - 20, cy - glow_r - 20,
+                             (glow_r + 20) * 2, (glow_r + 20) * 2))
 
-        # Hintergrundkreis hinter dem Logo
-        p.setBrush(QBrush(QColor("#1C2B38")))
+        # Innerer Kreis (dunkel)
+        inner_r = 34.0
+        p.setBrush(QBrush(QColor("#111E2A")))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QRectF(cx - logo_r, cy - logo_r, logo_r * 2, logo_r * 2))
+        p.drawEllipse(QRectF(cx - inner_r, cy - inner_r,
+                             inner_r * 2, inner_r * 2))
 
-        # Rotierender Teal-Ring (Ring 1)
-        arc_pen1 = QPen(_RING1, 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        p.setPen(arc_pen1)
+        # "N" in der Mitte des Kreises (statt Logo)
+        font_n = QFont("Segoe UI", 22, QFont.Weight.Light)
+        p.setFont(font_n)
+        fm_n = QFontMetricsF(font_n)
+        nw   = fm_n.horizontalAdvance("N")
+        p.setPen(QPen(_RING1))
+        p.drawText(QPointF(cx - nw / 2, cy + fm_n.ascent() / 2 - 2), "N")
+
+        # Ring 1 (Teal, gross, vorwaerts)
+        r1_r   = 44.0
+        r1_pen = QPen(_RING1, 2.8, Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap)
+        p.setPen(r1_pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        ring1_r = logo_r + 10
-        ring1_rect = QRectF(cx - ring1_r, cy - ring1_r, ring1_r * 2, ring1_r * 2)
-        # 240 Grad Bogen, der sich dreht
-        start1 = int(-(self._angle1) * 16)
-        p.drawArc(ring1_rect, start1, 240 * 16)
+        r1_rect = QRectF(cx - r1_r, cy - r1_r, r1_r * 2, r1_r * 2)
+        p.drawArc(r1_rect, int(-ang1 * 16), 230 * 16)
 
-        # Gegenlaeuftiger Gold-Ring (Ring 2, duenner)
-        arc_pen2 = QPen(_RING2, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        p.setPen(arc_pen2)
-        ring2_r = logo_r + 16
-        ring2_rect = QRectF(cx - ring2_r, cy - ring2_r, ring2_r * 2, ring2_r * 2)
-        start2 = int(-(self._angle2) * 16)
-        p.drawArc(ring2_rect, start2, 120 * 16)
-
-        # Logo Pixmap (oder Fallback-"N")
-        if self._logo_px:
-            lw, lh = self._logo_px.width(), self._logo_px.height()
-            p.drawPixmap(
-                int(cx - lw / 2), int(cy - lh / 2),
-                self._logo_px,
-            )
-        else:
-            # Fallback: "N" in der Mitte
-            font = QFont("Segoe UI", 40, QFont.Weight.Light)
-            p.setFont(font)
-            p.setPen(QPen(_RING1))
-            fm = QFontMetricsF(font)
-            tw = fm.horizontalAdvance("N")
-            p.drawText(QPointF(cx - tw / 2, cy + fm.ascent() / 2 - 4), "N")
+        # Ring 2 (Gold, kleiner, rueckwaerts)
+        r2_r   = 52.0
+        r2_pen = QPen(_RING2, 1.5, Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap)
+        p.setPen(r2_pen)
+        r2_rect = QRectF(cx - r2_r, cy - r2_r, r2_r * 2, r2_r * 2)
+        p.drawArc(r2_rect, int(-ang2 * 16), 110 * 16)
 
         # ── "NeSk" Schriftzug ─────────────────────────────────────────────
-        font_title = QFont("Segoe UI", 36, QFont.Weight.Light)
+        ty  = cy + 68.0    # Y-Position des Texts (Baseline)
+        font_title = QFont("Segoe UI", 32, QFont.Weight.Light)
         p.setFont(font_title)
         fm_t = QFontMetricsF(font_title)
         text = "NeSk"
         tw   = fm_t.horizontalAdvance(text)
         tx   = cx - tw / 2
-        ty   = cy + logo_r + 38    # unterhalb des Logo-Bereichs
 
-        # Basis-Text (grau)
-        p.setPen(QPen(QColor(180, 200, 215, 120)))
+        # Basis (gedaempft weiss)
+        p.setPen(QPen(QColor(180, 205, 220, 130)))
         p.drawText(QPointF(tx, ty), text)
 
-        # Shimmer-Overlay: heller Streifen wandert durch den Text
-        sh_cx = tx + self._shimmer * (tw + 60) - 20
-        sh_width = tw * 0.35
-        sh_grad = QLinearGradient(sh_cx - sh_width, float(ty) - 40,
-                                  sh_cx + sh_width, float(ty))
+        # Shimmer-Streifen durch den Text
+        sh_prog  = ((t * 0.55) % 1.9) - 0.4     # -0.4 .. 1.5
+        sh_cx    = tx + sh_prog * (tw + 60) - 15
+        sh_w     = tw * 0.30
+        sh_grad  = QLinearGradient(sh_cx - sh_w, ty - 38,
+                                   sh_cx + sh_w, ty)
         sh_grad.setColorAt(0.0, QColor(255, 255, 255, 0))
-        sh_grad.setColorAt(0.5, QColor(255, 255, 255, 200))
+        sh_grad.setColorAt(0.5, QColor(255, 255, 255, 210))
         sh_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
         p.setPen(QPen(QBrush(sh_grad), 0))
         p.drawText(QPointF(tx, ty), text)
-
-        # Letter-spacing Simulation: Buchstaben-Abstand durch Extra-Zeichnung
-        # (Qt unterstuetzt kein letter-spacing in drawText direkt;
-        #  wir zeichnen einfach mit font_title und geniessen den Font-Standard)
 
         # ── Untertitel ────────────────────────────────────────────────────
         font_sub = QFont("Segoe UI", 9)
@@ -203,38 +164,42 @@ class SplashScreen(QWidget):
         fm_s = QFontMetricsF(font_sub)
         sub  = "DRK  \u00b7  Flughafen K\u00f6ln / Bonn"
         sw   = fm_s.horizontalAdvance(sub)
-        p.setPen(QPen(_SUBTEXT))
-        p.drawText(QPointF(cx - sw / 2, ty + 26), sub)
+        p.setPen(QPen(_ACCENT))
+        p.drawText(QPointF(cx - sw / 2, ty + 24), sub)
 
-        # Version
         if self._version:
-            font_ver = QFont("Segoe UI", 8)
-            p.setFont(font_ver)
-            fm_v = QFontMetricsF(font_ver)
-            vt   = f"v{self._version}"
-            vw   = fm_v.horizontalAdvance(vt)
+            fv = QFont("Segoe UI", 8)
+            p.setFont(fv)
+            fmv = QFontMetricsF(fv)
+            vt  = f"v{self._version}"
+            vw  = fmv.horizontalAdvance(vt)
             p.setPen(QPen(_GRAY))
-            p.drawText(QPointF(cx - vw / 2, ty + 44), vt)
+            p.drawText(QPointF(cx - vw / 2, ty + 40), vt)
 
-        # ── Status-Zeile ──────────────────────────────────────────────────
-        vert_sep_y = H - 42
-        p.setPen(QPen(QColor("#253545")))
-        p.drawLine(QPointF(32, vert_sep_y), QPointF(W - 32, vert_sep_y))
+        # ── Trennlinie + Status ───────────────────────────────────────────
+        sep_y = H - 40
+        p.setPen(QPen(QColor("#1E3040")))
+        p.drawLine(QPointF(28, sep_y), QPointF(W - 28, sep_y))
 
         font_st = QFont("Segoe UI", 8)
         p.setFont(font_st)
-        p.setPen(QPen(QColor(90, 120, 145)))
-        p.drawText(QPointF(32, H - 22), self._status)
+        p.setPen(QPen(QColor(80, 112, 138)))
+        p.drawText(QPointF(28, H - 20), self._status)
 
-        # Teal-Streifen ganz unten
+        # Teal-Streifen unten
         p.fillRect(0, int(H) - 2, int(W), 2, QBrush(_RING1))
 
         p.end()
 
     # ------------------------------------------------------------------
     def set_status(self, message: str):
+        """Setzt Status und laesst die Animation kurz laufen."""
         self._status = message
-        QApplication.processEvents()
+        # Events pumpen damit Animation sichtbar laeuft
+        deadline = time.monotonic() + 0.08   # 80 ms Animation
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            self.repaint()
 
     def finish(self, main_window=None):
         self._timer.stop()
