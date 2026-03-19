@@ -172,55 +172,64 @@ def main():
     splash.show()
     QApplication.processEvents()
 
-    # ── DB-Backup ──────────────────────────────────────────────────────────
-    splash.set_status("Datenbank-Backup wird erstellt …")
-    _db_startup_backup()
+    _init_done = threading.Event()
 
-    # ── Migrationen ────────────────────────────────────────────────────────
-    splash.set_status("Datenbanktabellen werden geprüft …")
-    try:
-        from database.migrations import run_migrations
-        run_migrations()
-    except Exception as e:
-        print(f"[WARNUNG] Datenbankinitialisierung fehlgeschlagen: {e}")
-        print("[INFO] Bitte Datenbankverbindung in config.py konfigurieren.")
+    def _do_init():
+        # DB-Backup
+        splash.set_status("Datenbank-Backup wird erstellt …")
+        _db_startup_backup()
 
-    # ── Mitarbeiter-DB ─────────────────────────────────────────────────────
-    try:
-        from database.connection import init_mitarbeiter_db
-        init_mitarbeiter_db()
-    except Exception as e:
-        print(f"[WARNUNG] Mitarbeiter-DB Initialisierung fehlgeschlagen: {e}")
+        # Migrationen
+        splash.set_status("Datenbanktabellen werden geprüft …")
+        try:
+            from database.migrations import run_migrations
+            run_migrations()
+        except Exception as e:
+            print(f"[WARNUNG] Datenbankinitialisierung fehlgeschlagen: {e}")
+            print("[INFO] Bitte Datenbankverbindung in config.py konfigurieren.")
 
-    # ── Turso-Sync ─────────────────────────────────────────────────────────
-    # AUSNAHME: Falls ein Backup-Restore ausstehend ist, zuerst lokal → Turso pushen
-    # (verhindert dass pull_all() die wiederhergestellten Daten überschreibt).
-    try:
-        from database.turso_sync import (
-            ensure_turso_schema, pull_all, start_background_sync,
-            push_all_local_to_turso, init_sync_ts,
-        )
-        from backup.backup_manager import is_restore_pending, clear_restore_pending
-        splash.set_status("Verbindung wird geprüft …")
-        ensure_turso_schema()
-        if is_restore_pending():
-            splash.set_status("Daten werden übertragen …")
-            print("[Start] Backup-Restore ausstehend: sende wiederhergestellte Daten nach Turso...")
-            push_all_local_to_turso()
-            clear_restore_pending()
-            print("[Start] Turso wurde mit wiederhergestellten Daten aktualisiert.")
-        else:
-            splash.set_status("Verbindung wird hergestellt …")
-            pull_all()
-        # Timestamp setzen – Hintergrundthread startet danach ohne Doppelpull
-        init_sync_ts()
-        start_background_sync()
-    except Exception as e:
-        print(f"[WARNUNG] Turso-Sync konnte nicht gestartet werden: {e}")
-        print("[INFO] App läuft weiter mit lokalen Datenbanken.")
+        # Mitarbeiter-DB
+        try:
+            from database.connection import init_mitarbeiter_db
+            init_mitarbeiter_db()
+        except Exception as e:
+            print(f"[WARNUNG] Mitarbeiter-DB Initialisierung fehlgeschlagen: {e}")
 
-    # ── Hauptfenster ───────────────────────────────────────────────────────
+        # Turso-Sync
+        try:
+            from database.turso_sync import (
+                ensure_turso_schema, pull_all, start_background_sync,
+                push_all_local_to_turso, init_sync_ts,
+            )
+            from backup.backup_manager import is_restore_pending, clear_restore_pending
+            splash.set_status("Verbindung wird geprüft …")
+            ensure_turso_schema()
+            if is_restore_pending():
+                splash.set_status("Daten werden übertragen …")
+                push_all_local_to_turso()
+                clear_restore_pending()
+            else:
+                splash.set_status("Verbindung wird hergestellt …")
+                pull_all()
+            init_sync_ts()
+            start_background_sync()
+        except Exception as e:
+            print(f"[WARNUNG] Turso-Sync konnte nicht gestartet werden: {e}")
+            print("[INFO] App läuft weiter mit lokalen Datenbanken.")
+
+        _init_done.set()
+
+    threading.Thread(target=_do_init, daemon=True).start()
+
+    # Hauptthread: Splash direkt neu zeichnen → Ringe drehen garantiert
+    while not _init_done.is_set():
+        splash.repaint()
+        QApplication.processEvents()
+        time.sleep(0.016)   # 60 fps
+
+    # ── Hauptfenster (muss im Hauptthread erstellt werden) ─────────────────
     splash.set_status("Oberfläche wird geladen …")
+    QApplication.processEvents()
     window = MainWindow()
     splash.finish(window)
     window.show()

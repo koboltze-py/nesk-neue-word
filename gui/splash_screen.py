@@ -8,7 +8,7 @@ Ladebildschirm (Splash Screen) - Moderne Variante
 import os, sys, math, time
 
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore    import Qt, QTimer, QRectF, QPointF
+from PySide6.QtCore    import Qt, QRectF, QPointF
 from PySide6.QtGui     import (
     QColor, QPainter, QPen, QPixmap, QBrush, QFont, QFontMetricsF,
     QLinearGradient, QRadialGradient,
@@ -58,11 +58,6 @@ class SplashScreen(QWidget):
                 geo.center().x() - self.W // 2,
                 geo.center().y() - self.H // 2,
             )
-
-        # Timer fuer Neuzeichnen auch wenn set_status nicht gerufen wird
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.update)
-        self._timer.start(16)
 
     # ------------------------------------------------------------------
     def paintEvent(self, event):
@@ -197,5 +192,4 @@ class SplashScreen(QWidget):
         self._status = message
 
     def finish(self, main_window=None):
-        self._timer.stop()
         self.close()
