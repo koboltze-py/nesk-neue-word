@@ -180,10 +180,19 @@ def main():
         print(f"[WARNUNG] Mitarbeiter-DB Initialisierung fehlgeschlagen: {e}")
 
     # Turso-Sync: Schema sicherstellen, einmalig Pull beim Start, dann alle 30s
+    # AUSNAHME: Falls ein Backup-Restore ausstehend ist, zuerst lokal → Turso pushen
+    # (verhindert dass pull_all() die wiederhergestellten Daten überschreibt).
     try:
-        from database.turso_sync import ensure_turso_schema, pull_all, start_background_sync
+        from database.turso_sync import ensure_turso_schema, pull_all, start_background_sync, push_all_local_to_turso
+        from backup.backup_manager import is_restore_pending, clear_restore_pending
         ensure_turso_schema()
-        pull_all()
+        if is_restore_pending():
+            print("[Start] Backup-Restore ausstehend: sende wiederhergestellte Daten nach Turso...")
+            push_all_local_to_turso()
+            clear_restore_pending()
+            print("[Start] Turso wurde mit wiederhergestellten Daten aktualisiert.")
+        else:
+            pull_all()
         start_background_sync()
     except Exception as e:
         print(f"[WARNUNG] Turso-Sync konnte nicht gestartet werden: {e}")

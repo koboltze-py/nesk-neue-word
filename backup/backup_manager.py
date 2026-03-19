@@ -501,10 +501,47 @@ def restore_sql_backup(backup_pfad: str, ts: str | None = None) -> dict:
         except Exception as e:
             print(f"[Restore] Fehler bei {orig_name}: {e}")
 
+    erfolg = kopiert > 0
+    if erfolg:
+        # Marker schreiben: beim nächsten App-Start push_all_local_to_turso()
+        # statt pull_all() aufrufen, damit Turso die wiederhergestellten Daten erhält.
+        try:
+            set_restore_pending()
+        except Exception as e:
+            print(f"[Restore] Hinweis: Restore-Flag konnte nicht geschrieben werden: {e}")
+
     return {
-        "erfolg": kopiert > 0,
+        "erfolg": erfolg,
         "meldung": f"{kopiert} Datenbank(en) wiederhergestellt aus Snapshot {ts}.",
     }
+
+
+def _restore_pending_flag_path() -> str:
+    """Gibt den Pfad zur Marker-Datei zurück, die signalisiert dass ein Restore ausstehend ist."""
+    import os
+    from config import DB_PATH
+    return os.path.join(os.path.dirname(DB_PATH), "_restore_pending")
+
+
+def set_restore_pending() -> None:
+    """Schreibt die Restore-Pending Marker-Datei (signalisiert main.py: push statt pull beim Start)."""
+    with open(_restore_pending_flag_path(), "w", encoding="utf-8") as f:
+        from datetime import datetime
+        f.write(datetime.now().isoformat())
+
+
+def clear_restore_pending() -> None:
+    """Löscht die Restore-Pending Marker-Datei nach erfolgreichem Push."""
+    import os
+    p = _restore_pending_flag_path()
+    if os.path.exists(p):
+        os.remove(p)
+
+
+def is_restore_pending() -> bool:
+    """Prüft ob eine Wiederherstellung auf den Push nach Turso wartet."""
+    import os
+    return os.path.exists(_restore_pending_flag_path())
 
 
 # ---------------------------------------------------------------------------
