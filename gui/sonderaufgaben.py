@@ -891,7 +891,7 @@ class SonderaufgabenWidget(QWidget):
             self,
             "Anzahl Ausdrucke",
             f"Wie viele Ausdrucke sollen gedruckt werden?\n\n{saved.name}",
-            value=1, min=1, max=20, step=1
+            1, 1, 20, 1
         )
         if not ok:
             return
