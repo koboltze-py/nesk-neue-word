@@ -368,11 +368,13 @@ def erstelle_stellungnahme(daten: dict) -> tuple[str, str]:
     p_unt.runs[0].font.size = Pt(11)
 
     # ── Speichern ──────────────────────────────────────────────────────────────
-    doc.save(intern_pfad)    try:
+    doc.save(intern_pfad)
+    try:
         from functions.dokument_archiv import kopiere_ins_archiv
         kopiere_ins_archiv(intern_pfad, "stellungnahmen")
     except Exception:
-        pass    shutil.copy2(intern_pfad, extern_pfad)
+        pass
+    shutil.copy2(intern_pfad, extern_pfad)
     # ── Datenbank-Eintrag ───────────────────────────────────────────────────
     try:
         _db_eintrag_speichern(daten, intern_pfad, extern_pfad)
