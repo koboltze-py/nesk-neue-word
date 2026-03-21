@@ -75,3 +75,9 @@ FIORI_WARNING     = "#e9730c"
 FIORI_ERROR       = "#bb0000"
 FIORI_WHITE       = "#ffffff"
 FIORI_SIDEBAR_BG  = "#354a5e"
+
+# ─── KI-Integration ───────────────────────────────────────────────────────────
+GEMINI_API_KEY = "AIzaSyAoO7bSaxupDJszFv3oS3POA4b0AGMatRQ"
+
+# ─── Datenbank-Pfade (explizit) ───────────────────────────────────────────────
+BESCHWERDEN_DB_PATH = os.path.join(_DB_DIR, "beschwerden.db")
