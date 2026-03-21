@@ -139,6 +139,11 @@ class StaerkemeldungExport:
                 except OSError:
                     pass
 
+        try:
+            from functions.dokument_archiv import kopiere_ins_archiv
+            kopiere_ins_archiv(pfad_final, "staerkemeldung")
+        except Exception:
+            pass
         return pfad_final, warnungen
 
     # ------------------------------------------------------------------

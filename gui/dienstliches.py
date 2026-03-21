@@ -762,6 +762,11 @@ def export_einsaetze_excel(
     ws.freeze_panes = "A4"
 
     wb.save(ziel_pfad)
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(ziel_pfad, "einsatzprotokoll")
+    except Exception:
+        pass
     return ziel_pfad
 
 
@@ -1080,6 +1085,11 @@ def export_patienten_excel(
         ws.print_area = f"A1:{get_column_letter(6)}{r-1}"
 
     wb.save(ziel_pfad)
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(ziel_pfad, "patienten_excel")
+    except Exception:
+        pass
     return ziel_pfad
 
 
@@ -1627,6 +1637,11 @@ def export_patient_word(
     fuss_r.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     doc.save(ziel_pfad)
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(ziel_pfad, "patienten_word")
+    except Exception:
+        pass
     return ziel_pfad
 
 

@@ -1,8 +1,8 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 20.03.2026 – v3.4.5  
+**Stand:** 21.03.2026 – v3.5.0  
 **Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn  
-**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Einsatzprotokoll, Verspätungs-Meldungen, Telefonnummern-Verzeichnis, PSA-Tracking, Hilfe-Screenshot-Galerie
+**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Einsatzprotokoll, Verspätungs-Meldungen, Telefonnummern-Verzeichnis, PSA-Tracking, Hilfe-Screenshot-Galerie, Passagieranfragen
 
 ---
 
@@ -465,6 +465,22 @@ Alle SQLite-Datenbanken liegen seit **05.03.2026** zentral im Ordner `database S
 ---
 
 ## 9. Änderungshistorie
+
+### 21.03.2026 – v3.5.0 – Passagieranfragen-Modul
+
+#### `gui/passagieranfragen.py` (neu)
+- **OutlookInboxDialog**: Öffnet Outlook-Posteingang per win32com, lädt die letzten 75 E-Mails (Datum, Von, Betreff), Doppelklick überträgt E-Mail + Absenderdaten direkt in die Felder
+- **Absender-E-Mail**: wird aus `msg.SenderEmailAddress` gelesen (nicht aus dem Body-Text); Exchange-interne Adressen (EX:/O=/CN=) werden automatisch übersprungen
+- **`_parse_email_fields()`**: 5-stufige Namensextraktion (Vorname/Nachname-Labels, Anrede-Block, `Name:`-Label, Herr/Frau-Fließtext, Von-Header), Anrede, E-Mail-Regex, Flugnummer-Regex, Datum-Parser (dd.MM.yyyy + Monatsname)
+- **Anrede-Dropdown** (–, Herr, Frau): wird automatisch gesetzt, kann manuell überschrieben werden
+- **`_set_antwort()`**: personalisiert Begrüßung (`Sehr geehrter Herr X,`), fügt Bezug-Zeile mit Flugdaten ein, optionaler Flugdaten-Hinweis vor Signatur
+- **4 Szenarien**: Bestätigung (alle Daten), Fehlende Daten, Parkplatz-Abholung, PRM-Info (5 Schritte)
+- **`create_outlook_draft()`**: win32com-Entwurf mit DRK-Logo (`Daten/Email/Logo.jpg`) als CID-Inline-Bild; Betreff automatisch aus Name + Flug + Datum zusammengestellt
+
+#### `gui/main_window.py`
+- `PassagieranfragenWidget` bei Index 16 in NAV_ITEMS, Stack und Refresh-Map eingetragen
+
+---
 
 ### 25.02.2026 – Session
 

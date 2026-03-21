@@ -1,6 +1,6 @@
 # Nesk3 – Reproduktionsprotokoll
 
-**Stand:** 12.03.2026 – v3.4.2  
+**Stand:** 21.03.2026 – v3.5.0  
 **Ziel:** Vollständige Neuerstellung der Nesk3-Anwendung auf einem neuen System
 
 ---
@@ -17,7 +17,7 @@
 | SQLite | 3.x | Eingebaut in Python |
 
 ```powershell
-pip install PySide6 openpyxl python-docx pywin32
+pip install PySide6 openpyxl python-docx pypdf pywin32
 ```
 
 ---
@@ -31,7 +31,7 @@ Nesk3/
 │
 ├── gui/
 │   ├── __init__.py
-│   ├── main_window.py               # Hauptfenster, 13-Seiten-Navigation
+│   ├── main_window.py               # Hauptfenster, 17-Seiten-Navigation
 │   ├── dashboard.py                 # Dashboard (Statistik-Karten, Flugzeug-Animation)
 │   ├── dienstplan.py                # Dienstplan (Excel-Import, Tabelle, Export)
 │   ├── dienstliches.py              # Einsatzprotokoll + Übersicht [NEU v3.x]
@@ -45,7 +45,9 @@ Nesk3/
 │   ├── mitarbeiter_dokumente.py     # Dokumente + Stellungnahmen + Verspätung [NEU v3.x]
 │   ├── einstellungen.py             # Einstellungen (Pfade, E-Mobby)
 │   ├── checklisten.py               # Checklisten
-│   └── hilfe_dialog.py              # Animierter Hilfe-Dialog
+│   ├── hilfe_dialog.py              # Animierter Hilfe-Dialog
+│   ├── beschwerden.py               # Beschwerden-Verwaltung [NEU v3.5]
+│   └── passagieranfragen.py         # Passagieranfragen (Outlook-Inbox, Extraktion, Szenarien) [NEU v3.5]
 │
 ├── functions/
 │   ├── __init__.py
@@ -63,7 +65,8 @@ Nesk3/
 │   ├── stellungnahmen_db.py         # Stellungnahmen-DB (WAL) [NEU v3.x]
 │   ├── stellungnahmen_html_export.py # HTML-Ansicht Stellungnahmen [NEU v3.x]
 │   ├── uebergabe_functions.py       # DB CRUD für Übergabe
-│   └── verspaetung_db.py            # Verspätungs-DB (WAL, _connect()) [NEU v3.x]
+│   ├── verspaetung_db.py            # Verspätungs-DB (WAL, _connect()) [NEU v3.x]
+│   └── beschwerden_db.py            # Beschwerden-DB [NEU v3.5]
 │
 ├── database/
 │   ├── __init__.py
@@ -198,19 +201,23 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QP
 from PySide6.QtGui import QFont
 
 NAV_ITEMS = [
-    ("🏠", "Dashboard",       0),
-    ("👥", "Mitarbeiter",     1),
-    ("☕️", "Dienstliches",   2),
-    ("☀️", "Aufgaben Tag",    3),
-    ("🌙", "Aufgaben Nacht",  4),
-    ("📅", "Dienstplan",      5),
-    ("📋", "Übergabe",        6),
-    ("🚗", "Fahrzeuge",       7),
-    ("🕐", "Code 19",         8),
-    ("🖨️", "Ma. Ausdrucke",  9),
-    ("🤒", "Krankmeldungen", 10),
-    ("💾", "Backup",         11),
-    ("⚙️",  "Einstellungen",  12),
+    ("🏠", "Dashboard",           0),
+    ("👥", "Mitarbeiter",         1),
+    ("☕️", "Dienstliches",       2),
+    ("☀️", "Aufgaben Tag",        3),
+    ("🌙", "Aufgaben Nacht",      4),
+    ("📅", "Dienstplan",          5),
+    ("📋", "Übergabe",            6),
+    ("🚗", "Fahrzeuge",           7),
+    ("🕐", "Code 19",             8),
+    ("🖨️", "Ma. Ausdrucke",      9),
+    ("🤒", "Krankmeldungen",     10),
+    ("📞", "Telefonnummern",     11),
+    ("♿",  "Call Transcription", 12),
+    ("💾", "Backup",             13),
+    ("⚙️",  "Einstellungen",     14),
+    ("📣",  "Beschwerden",       15),
+    ("✉️",  "Passagieranfragen", 16),
 ]
 
 class MainWindow(QMainWindow):
@@ -520,7 +527,7 @@ python3.13 main.py
 
 ### Erste Inbetriebnahme Checkliste
 - [ ] Python 3.13+ installiert
-- [ ] `pip install PySide6 openpyxl python-docx pywin32`
+- [ ] `pip install PySide6 openpyxl python-docx pypdf pywin32`
 - [ ] `Daten/E-Mobby/mobby.txt` mit Fahrernamen befüllt
 - [ ] App starten → DB wird automatisch erstellt
 - [ ] Einstellungen öffnen → Pfade zu Dienstplan-Excel, Sonderaufgaben, AOCC, Code-19 eintragen
@@ -528,7 +535,225 @@ python3.13 main.py
 
 ---
 
-## 13. EXE erstellen (PyInstaller)
+## 13. Passagieranfragen-Modul (`gui/passagieranfragen.py`)
+
+Verarbeitet eingehende Passagieranfragen aus Outlook: liest den Posteingang, extrahiert Kontakt- und Flugdaten und erstellt passende Antwort-Entwürfe per win32com.
+
+### Abhängigkeiten
+```python
+from pathlib import Path
+from PySide6.QtWidgets import (
+    QWidget, QDialog, QHBoxLayout, QVBoxLayout, QLabel,
+    QPushButton, QTextEdit, QLineEdit, QComboBox, QCheckBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
+    QDialogButtonBox, QMessageBox)
+from PySide6.QtCore import Qt
+from config import BASE_DIR
+
+_LOGO_PATH = str(Path(BASE_DIR) / "Daten" / "Email" / "Logo.jpg")
+```
+
+### `OutlookInboxDialog` – Posteingang-Auswahl
+
+```python
+class OutlookInboxDialog(QDialog):
+    """Lädt die letzten 75 Outlook-Inbox-Mails, zeigt sie als Tabelle."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Outlook-Posteingang")
+        self.setMinimumSize(800, 500)
+        self.selected_sender_email = ""
+        self.selected_sender_name  = ""
+        self._body = ""
+        self._build_ui()
+        self._load_mails()
+
+    def _load_mails(self):
+        try:
+            import win32com.client
+            try:
+                ol = win32com.client.GetActiveObject("Outlook.Application")
+            except Exception:
+                ol = win32com.client.Dispatch("Outlook.Application")
+            ns    = ol.GetNamespace("MAPI")
+            inbox = ns.GetDefaultFolder(6)   # 6 = olFolderInbox
+            items = inbox.Items
+            items.Sort("[ReceivedTime]", True)  # neueste zuerst
+            for i in range(1, min(76, items.Count + 1)):
+                msg = items[i]
+                try:
+                    datum   = str(msg.ReceivedTime)[:16]
+                    sender  = msg.SenderName or ""
+                    betreff = msg.Subject or ""
+                    email   = msg.SenderEmailAddress or ""
+                    # Exchange-interne Adressen (EX:/O=...) → SMTP-Fallback
+                    if email.upper().startswith(("/O=", "EX:", "/CN=")):
+                        try:
+                            email = msg.ReplyRecipients(1).Address
+                        except Exception:
+                            email = ""
+                    # Zeile in QTableWidget eintragen …
+                except Exception:
+                    continue
+        except Exception as e:
+            QMessageBox.warning(self, "Outlook", f"Fehler beim Laden: {e}")
+
+    def get_body(self) -> str:
+        return self._body
+```
+
+### `_parse_email_fields()` – 5-stufige Namensextraktion
+
+```python
+import re
+
+def _parse_email_fields(text: str) -> dict:
+    """Extrahiert Name, Anrede, E-Mail, Flugnummer, Datum aus E-Mail-Text."""
+    result = {"name": "", "anrede": "", "email": "",
+              "flugnummer": "", "datum": "", "rueckflug": ""}
+
+    # Stufe 1: Vorname / Nachname als separate Felder (mehrzeilig)
+    vn = re.search(r"Vorname[:\s]+(.+)", text, re.IGNORECASE)
+    nn = re.search(r"Nachname[:\s]+(.+)", text, re.IGNORECASE)
+    if vn and nn:
+        result["name"] = f"{vn.group(1).strip()} {nn.group(1).strip()}"
+
+    # Stufe 2: Anrede-Block  "Anrede: Herr Mustermann"
+    m = re.search(r"Anrede[:\s]+(Herr|Frau)\s+(.+)", text, re.IGNORECASE)
+    if m and not result["name"]:
+        result["anrede"] = m.group(1).strip()
+        result["name"]   = m.group(2).strip()
+
+    # Stufe 3: "Name:" Label
+    m = re.search(r"\bName[:\s]+(.+)", text, re.IGNORECASE)
+    if m and not result["name"]:
+        result["name"] = m.group(1).strip()
+
+    # Stufe 4: "Herr / Frau" im Fließtext
+    m = re.search(r"\b(Herr|Frau)\s+([A-ZÄÖÜ][a-zäöüß]+([\s-][A-ZÄÖÜ][a-zäöüß]+)*)", text)
+    if m and not result["name"]:
+        result["anrede"] = m.group(1)
+        result["name"]   = m.group(2).strip()
+
+    # Stufe 5: "Von:" Header als letzter Fallback
+    m = re.search(r"Von:\s*(.+?)(?:\s*<|\s*$)", text, re.IGNORECASE)
+    if m and not result["name"]:
+        result["name"] = m.group(1).strip()
+
+    # E-Mail-Adresse
+    m = re.search(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", text, re.IGNORECASE)
+    if m:
+        result["email"] = m.group(0)
+
+    # Flugnummer (z. B. EW583, 4U123)
+    m = re.search(r"\b([A-Z]{1,2}\d{2,4})\b", text)
+    if m:
+        result["flugnummer"] = m.group(1)
+
+    # Datum (DD.MM.YYYY oder YYYY-MM-DD)
+    m = re.search(r"\b(\d{1,2}\.\d{1,2}\.\d{4}|\d{4}-\d{2}-\d{2})\b", text)
+    if m:
+        result["datum"] = m.group(1)
+
+    return result
+```
+
+### `PassagieranfragenWidget` – Aufbau
+
+Linkes Panel: Posteingang-Button, E-Mail-Rohtext, 5 extrahierbare Felder (Name, Anrede, E-Mail, Flugnummer, Datum).  
+Rechtes Panel: 4 Szenario-Buttons, Flugdaten-Checkbox, Antwort-Textarea, Outlook-Button.
+
+```python
+BUTTON_STYLE = (
+    "background-color:#1e5799;color:white;font-weight:bold;"
+    "border-radius:6px;padding:6px;"
+)
+
+class PassagieranfragenWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # … QSplitter mit linkem und rechtem Panel …
+
+        self._inbox_btn.clicked.connect(self._load_from_inbox)
+        self._extract_btn.clicked.connect(self._extract)
+
+        for label, slot in [
+            ("✅ Antwort Vollständig",  self._antwort_komplett),
+            ("❓ Fehlende Daten",       self._antwort_fehlende_daten),
+            ("🅿️ Parkplatz-Info",      self._antwort_parkplatz),
+            ("ℹ️ Allgemeine Info",      self._antwort_info_service),
+        ]:
+            btn = QPushButton(label)
+            btn.setStyleSheet(BUTTON_STYLE)
+            btn.clicked.connect(slot)
+
+    def _load_from_inbox(self):
+        dlg = OutlookInboxDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._email_text.setPlainText(dlg.get_body())
+            self._extract()
+            # Sender-E-Mail aus COM überschreibt ggf. extrahierte Adresse
+            if dlg.selected_sender_email:
+                self._f_email.setText(dlg.selected_sender_email)
+            if not self._f_name.text() and dlg.selected_sender_name:
+                self._f_name.setText(dlg.selected_sender_name)
+
+    def _extract(self):
+        fields = _parse_email_fields(self._email_text.toPlainText())
+        self._f_name.setText(fields["name"])
+        self._f_anrede.setCurrentText(fields["anrede"])
+        self._f_email.setText(fields["email"])
+        self._f_flug.setText(fields["flugnummer"])
+        self._f_datum.setText(fields["datum"])
+
+    def _set_antwort(self, vorlage: str):
+        name   = self._f_name.text().strip()
+        anrede = self._f_anrede.currentText()
+        flug   = self._f_flug.text().strip()
+        datum  = self._f_datum.text().strip()
+
+        if anrede and name:
+            suffix = "r" if anrede == "Herr" else ""
+            greet  = f"Sehr geehrte{suffix} {anrede} {name},"
+        elif name:
+            greet = f"Sehr geehrte/r {name},"
+        else:
+            greet = "Sehr geehrte Damen und Herren,"
+
+        bezug = f"\nBezug: Flug {flug}, {datum}\n" if (flug or datum) else ""
+        text  = f"{greet}{bezug}\n\n{vorlage}"
+
+        if self._flugdaten_chk.isChecked():
+            text += ("\n\n[Bitte teilen Sie uns Ihre genauen Flugdaten mit,"
+                     " damit wir Ihnen weiterhelfen können.]")
+        self._antwort_text.setPlainText(text)
+
+    def _open_outlook(self):
+        from functions.mail_functions import create_outlook_draft
+        create_outlook_draft(
+            to=self._f_email.text().strip(),
+            subject=f"Ihre Anfrage – Flug {self._f_flug.text().strip()}",
+            body_text=self._antwort_text.toPlainText(),
+            logo_path=_LOGO_PATH,
+        )
+```
+
+### In `main_window.py` registrieren
+
+```python
+from gui.passagieranfragen import PassagieranfragenWidget
+
+# NAV_ITEMS Index 16:
+("✉️", "Passagieranfragen", 16),
+
+# In _build_ui() – Stack-Widget:
+self._stack.addWidget(PassagieranfragenWidget())
+```
+
+---
+
+## 14. EXE erstellen (PyInstaller)
 
 ```powershell
 cd "...\Nesk\Nesk3"

@@ -1,8 +1,8 @@
 # Nesk3 – Vollständige Funktionsübersicht
 
-**Stand:** 12.03.2026 – v3.4.2  
+**Stand:** 21.03.2026 – v3.5.0  
 **App:** Nesk3 – DRK Erste-Hilfe-Station Flughafen Köln/Bonn  
-**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterdokumente, Einsatzprotokoll, Verspätungs-Meldungen, Übergabe, Code-19, Hilfe-Screenshot-Galerie
+**Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterdokumente, Einsatzprotokoll, Verspätungs-Meldungen, Übergabe, Code-19, Telefonnummern-Verzeichnis, Anrufprotokoll, Beschwerdemanagement, Passagieranfragen-Bearbeitung
 
 ---
 
@@ -21,11 +21,13 @@
 11. [Dienstliches (Einsatzprotokoll)](#11-dienstliches-einsatzprotokoll)
 12. [Mitarbeiterdokumente / Stellungnahmen / Verspätung](#12-mitarbeiterdokumente--stellungnahmen--verspätung)
 13. [Einstellungen](#13-einstellungen)
-14. [Checklisten / Backup / Ma. Ausdrucke](#14-checklisten--backup--ma-ausdrucke)
-15. [Datenbanken (SQLite)](#15-datenbanken-sqlite)
-16. [Functions-Module](#16-functions-module)
-17. [HilfeDialog](#17-hilfedialog)
-18. [Konfiguration (config.py)](#18-konfiguration-configpy)
+14. [Beschwerden](#14-beschwerden)
+15. [Passagieranfragen](#15-passagieranfragen)
+16. [Checklisten / Backup / Ma. Ausdrucke / Telefonnummern / Anrufprotokoll](#16-checklisten--backup--ma-ausdrucke--telefonnummern--anrufprotokoll)
+17. [Datenbanken (SQLite)](#17-datenbanken-sqlite)
+18. [Functions-Module](#18-functions-module)
+19. [HilfeDialog](#19-hilfedialog)
+20. [Konfiguration (config.py)](#20-konfiguration-configpy)
 
 ---
 
@@ -51,9 +53,13 @@
   | 🕐 | Code 19 | 8 |
   | 🖨️ | Ma. Ausdrucke | 9 |
   | 🤒 | Krankmeldungen | 10 |
-  | 💾 | Backup | 11 |
-  | ⚙️ | Einstellungen | 12 |
-- `QStackedWidget` als Hauptbereich (13 Seiten)
+  | � | Telefonnummern | 11 |
+  | ♿ | Call Transcription | 12 |
+  | 💾 | Backup | 13 |
+  | ⚙️ | Einstellungen | 14 |
+  | 📣 | Beschwerden | 15 |
+  | ✉️ | Passagieranfragen | 16 |
+- `QStackedWidget` als Hauptbereich (17 Seiten)
 - Automatisches Laden beim Start: Dienstplan-Status aus DB
 
 ---
@@ -298,7 +304,47 @@ E-Mobby-Verwaltung:
 
 ---
 
-## 14. Checklisten / Backup / Ma. Ausdrucke
+## 14. Beschwerden
+
+### `gui/beschwerden.py` – `BeschwerdenWidget(QWidget)`
+- Erfassung von Beschwerden aus Freitext, Word-Dateien (`.docx`) oder PDF-Dateien
+- **Import-Dialog (`BeschwerdeImportDialog`)**: lädt Freitext oder Datei, zeigt Vorschau; unterstützt Drag & Drop
+- **Heuristische Extraktion**: Namens-Erkennung, E-Mail-Erkennung, Telefonnummer-Erkennung aus dem Beschwerde-Text
+- **Anonymisierung**: automatisches Entfernen von Personendaten vor der KI-Analyse
+- **Gemini-KI-Analyse**: Anfrage an Google Generative AI API (Hintergrund-Thread via `threading`)
+- **Outlook-Antwort**: erstellt Mail-Entwurf via `mail_functions.create_outlook_draft()`
+- **Bearbeitungs-Dialog (`BeschwerdeBearbeitenDialog`)**: Bearbeiten/Nachpflegen bestehender Einträge
+- **Volltext-Viewer (`VolltextDialog`)**: scrollbare Anzeige langer Beschwerde-Texte
+- **Statussystem**: offen → in Bearbeitung → abgeschlossen
+- Speicherung in `beschwerden.db` via `functions/beschwerden_db.py`
+
+### `functions/beschwerden_db.py`
+- `init_db()`: Erstellt `beschwerden.db` mit WAL-Modus
+- `beschwerde_speichern(daten)`: Neue Beschwerde anlegen
+- `beschwerde_aktualisieren(id, daten)`: Eintrag aktualisieren
+- `alle_beschwerden_laden()`: Alle Einträge aus DB
+- `beschwerde_laden(id)`: Einzelner Eintrag
+- `beschwerde_loeschen(id)`: Eintrag löschen
+
+---
+
+## 15. Passagieranfragen
+
+### `gui/passagieranfragen.py` – `PassagieranfragenWidget(QWidget)`
+- Verarbeitung eingehender Passagieranfragen aus dem Outlook-Posteingang
+- **`OutlookInboxDialog(QDialog)`**: zeigt die letzten 75 Inbox-E-Mails via `win32com.client`; Doppelklick oder OK lädt E-Mail-Text und Absenderdaten
+- **Exchange-Adressen**: prüft `SenderEmailAddress` auf `EX:`/`/O=` → SMTP-Fallback via `ReplyRecipients(1).Address`
+- **`_parse_email_fields(text)`**: 5-stufige Namens-Extraktion (Vorname/Nachname-Felder → Anrede-Block → `Name:`-Label → Herr/Frau Fließtext → `Von:`-Header)
+- **4 Antwort-Szenarien**: Antwort Vollständig, Fehlende Daten, Parkplatz-Info, Allgemeine Info
+- **Personalisierte Begrüßung**: `Sehr geehrter Herr X,` / `Sehr geehrte Frau X,`
+- **Bezug-Zeile**: automatisch aus extrahierter Flugnummer + Datum zusammengesetzt
+- **Flugdaten-Checkbox**: fügt Anfrage nach vollständigen Flugdaten an Antworttext an
+- **Outlook-Entwurf**: `create_outlook_draft()` mit eingebettetem DRK-Logo (CID `nesk_logo`)
+- Kein eigenes DB-Modul – reine Outlook-Integration via `win32com`
+
+---
+
+## 16. Checklisten / Backup / Ma. Ausdrucke / Telefonnummern / Anrufprotokoll
 
 ### `gui/checklisten.py` – `ChecklistenWidget(QWidget)`
 - Vordefinierte und benutzerdefinierte Checklisten
@@ -311,16 +357,22 @@ E-Mobby-Verwaltung:
 ### Nav-Seite „Krankmeldungen" (Index 10)
 - Öffnet Ordner `Daten/Krankmeldungen/` oder zeigt Dokument-Browser
 
-### Nav-Seite „Backup" (Index 11)
+### Nav-Seite „Telefonnummern" (Index 11)
+→ vollständiges Widget: `gui/telefonnummern.py` – importiert Nummern-Verzeichnisse aus Excel (FKB Gate-/Check-In-Nummern, DRK-Kontakte), mit Suche, Kategorien und Bearbeitungs-Dialog; DB-Zugriff via `functions/telefonnummern_db.py`
+
+### Nav-Seite „Call Transcription" (Index 12)
+→ vollständiges Widget: `gui/call_transcription.py` (`CallTranscriptionWidget`) – Anrufprotokoll mit Textbausteinen, Flugnummer-Auswahl mit Ziel/Herkunft-Befüllung, PRM-Format-Export in Zwischenablage, Verlaufsliste; DB via `functions/call_transcription_db.py`
+
+### Nav-Seite „Backup" (Index 13)
 - ZIP-Backup erstellen (via `backup_manager.py`): `Backup Data/Nesk3_backup_YYYYMMDD_HHMMSS.zip`
 - Backup-Liste anzeigen, Restore anstoßen
 - **Ausgeschlossen**: `Backup Data/`, `build_tmp/`, `Exe/`, `__pycache__/` → Größe ~8 MB
 
 ---
 
-## 15. Datenbanken (SQLite)
+## 17. Datenbanken (SQLite)
 
-Alle 5 SQLite-Datenbanken liegen seit **05.03.2026** zentral in `database SQL/`.
+Alle 6 SQLite-Datenbanken liegen seit **05.03.2026** zentral in `database SQL/`.
 
 | Datei | Beschreibung | WAL | Zugriff über |
 |---|---|---|---|
@@ -329,6 +381,7 @@ Alle 5 SQLite-Datenbanken liegen seit **05.03.2026** zentral in `database SQL/`.
 | `stellungnahmen.db` | Passagierbeschwerde-Stellungnahmen | ✅ | `functions/stellungnahmen_db.py` |
 | `einsaetze.db` | Einsatzprotokoll FKB (Dienstliches) | ✅ | `gui/dienstliches.py` |
 | `verspaetungen.db` | Verspätungs-Meldungen | ✅ | `functions/verspaetung_db.py` |
+| `beschwerden.db` | Beschwerden-Verwaltung [NEU v3.5] | ✅ | `functions/beschwerden_db.py` |
 
 **WAL-Konfiguration** (alle DBs):
 ```python
@@ -360,7 +413,7 @@ sqlite3.connect(pfad, timeout=5)
 
 ---
 
-## 16. Functions-Module
+## 18. Functions-Module
 
 | Datei | Hauptfunktionen |
 |-------|----------------|
@@ -379,10 +432,16 @@ sqlite3.connect(pfad, timeout=5)
 | `stellungnahmen_html_export.py` | HTML-Ansicht Stellungnahmen generieren |
 | `uebergabe_functions.py` | DB CRUD für Übergabe-Protokolle |
 | `verspaetung_db.py` | CRUD für Verspätungs-DB (WAL, `_connect()`-Helfer) |
+| `beschwerden_db.py` | CRUD für Beschwerden-DB (WAL) [NEU v3.5] |
+| `call_transcription_db.py` | CRUD für Anrufprotokoll-DB [NEU v3.5] |
+| `telefonnummern_db.py` | Import und CRUD für Telefonnummern-Verzeichnis [NEU v3.5] |
+| `dienstanweisungen_db.py` | DB für Dienstanweisungen [NEU v3.5] |
+| `psa_db.py` | DB für PSA-Verwaltung [NEU v3.5] |
+| `verspaetung_functions.py` | Hilfsfunktionen für Verspätungs-Meldungen [NEU v3.5] |
 
 ---
 
-## 17. HilfeDialog
+## 19. HilfeDialog
 
 ### `gui/hilfe_dialog.py` – `HilfeDialog(QDialog)`
 Animierter Hilfe-Dialog mit 5 Tabs:
@@ -402,7 +461,7 @@ Animationen:
 
 ---
 
-## 18. Konfiguration (`config.py`)
+## 20. Konfiguration (`config.py`)
 
 ```python
 BASE_DIR    # Absoluter Pfad zu Nesk3/

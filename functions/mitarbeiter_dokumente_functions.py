@@ -147,6 +147,16 @@ def erstelle_dokument_aus_vorlage(
     doc.add_paragraph("Unterschrift")
 
     doc.save(ziel_pfad)
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        _bereich = {
+            "Stellungnahmen": "stellungnahmen",
+            "Dienstanweisungen": "dienstanweisungen",
+            "Verspätung": "verspaetung",
+        }.get(kategorie, "mitarbeiterdokumente")
+        kopiere_ins_archiv(ziel_pfad, _bereich)
+    except Exception:
+        pass
     return ziel_pfad
 
 
@@ -358,8 +368,11 @@ def erstelle_stellungnahme(daten: dict) -> tuple[str, str]:
     p_unt.runs[0].font.size = Pt(11)
 
     # ── Speichern ──────────────────────────────────────────────────────────────
-    doc.save(intern_pfad)
-    shutil.copy2(intern_pfad, extern_pfad)
+    doc.save(intern_pfad)    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(intern_pfad, "stellungnahmen")
+    except Exception:
+        pass    shutil.copy2(intern_pfad, extern_pfad)
     # ── Datenbank-Eintrag ───────────────────────────────────────────────────
     try:
         _db_eintrag_speichern(daten, intern_pfad, extern_pfad)
@@ -481,4 +494,9 @@ def erstelle_dienstanweisung_freitext(
             run.font.size = Pt(schriftgroesse)
 
     doc.save(ziel_pfad)
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(ziel_pfad, "dienstanweisungen")
+    except Exception:
+        pass
     return ziel_pfad

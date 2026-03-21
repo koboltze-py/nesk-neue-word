@@ -839,6 +839,11 @@ class SonderaufgabenWidget(QWidget):
                 _c.value = bemerkung if bemerkung else None
 
             wb.save(str(output_path))
+            try:
+                from functions.dokument_archiv import kopiere_ins_archiv
+                kopiere_ins_archiv(str(output_path), "sonderaufgaben")
+            except Exception:
+                pass
             self.reload_tree()   # Baum nach Speichern aktualisieren
 
             if not silent:

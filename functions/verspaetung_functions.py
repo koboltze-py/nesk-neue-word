@@ -157,6 +157,11 @@ def erstelle_verspaetungs_dokument(daten: dict) -> str:
         para_vor_tabelle.append(new_r)
 
     doc.save(str(ziel_pfad))
+    try:
+        from functions.dokument_archiv import kopiere_ins_archiv
+        kopiere_ins_archiv(str(ziel_pfad), "verspaetung")
+    except Exception:
+        pass
     return str(ziel_pfad)
 
 
