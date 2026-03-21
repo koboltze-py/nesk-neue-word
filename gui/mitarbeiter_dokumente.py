@@ -1047,9 +1047,9 @@ class MitarbeiterDokumenteWidget(QWidget):
         btn_ordner.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ordner.setToolTip("Mitarbeiterdokumente-Ordner im Explorer öffnen")
         btn_ordner.setStyleSheet(
-            "QPushButton{background:rgba(255,255,255,0.15);color:white;"
-            "border:1px solid rgba(255,255,255,0.3);border-radius:4px;padding:4px 10px;}"
-            "QPushButton:hover{background:rgba(255,255,255,0.25);}"
+            "QPushButton{background:rgba(255,255,255,38);color:white;"
+            "border:1px solid rgba(255,255,255,77);border-radius:4px;padding:4px 10px;}"
+            "QPushButton:hover{background:rgba(255,255,255,64);}"
         )
         btn_ordner.clicked.connect(self._ordner_oeffnen)
         hl.addWidget(btn_ordner)
@@ -1059,9 +1059,9 @@ class MitarbeiterDokumenteWidget(QWidget):
         btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_refresh.setToolTip("Dateiliste aktualisieren")
         btn_refresh.setStyleSheet(
-            "QPushButton{background:rgba(255,255,255,0.15);color:white;"
-            "border:1px solid rgba(255,255,255,0.3);border-radius:4px;}"
-            "QPushButton:hover{background:rgba(255,255,255,0.25);}"
+            "QPushButton{background:rgba(255,255,255,38);color:white;"
+            "border:1px solid rgba(255,255,255,77);border-radius:4px;}"
+            "QPushButton:hover{background:rgba(255,255,255,64);}"
         )
         btn_refresh.clicked.connect(self.refresh)
         hl.addWidget(btn_refresh)

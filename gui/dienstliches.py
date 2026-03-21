@@ -3597,7 +3597,7 @@ class _UebersichtTab(QWidget):
         vl = QVBoxLayout(card)
         vl.setSpacing(2)
         lbl = QLabel(label)
-        lbl.setStyleSheet("color:rgba(255,255,255,0.8);font-size:11px;background:transparent;")
+        lbl.setStyleSheet("color:rgba(255,255,255,204);font-size:11px;background:transparent;")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         val = QLabel(wert)
         val.setObjectName("val")
@@ -3742,9 +3742,9 @@ class DienstlichesWidget(QWidget):
         btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_refresh.setToolTip("Ansicht aktualisieren")
         btn_refresh.setStyleSheet(
-            "QPushButton{background:rgba(255,255,255,0.15);color:white;"
-            "border:1px solid rgba(255,255,255,0.3);border-radius:4px;}"
-            "QPushButton:hover{background:rgba(255,255,255,0.25);}"
+            "QPushButton{background:rgba(255,255,255,38);color:white;"
+            "border:1px solid rgba(255,255,255,77);border-radius:4px;}"
+            "QPushButton:hover{background:rgba(255,255,255,64);}"
         )
         btn_refresh.clicked.connect(self.refresh)
         hl.addWidget(btn_refresh)

@@ -240,10 +240,15 @@ class TelefonnummernWidget(QWidget):
         ("🚪  Interne & Gate",  "Interne & Gate"),
     ]
 
+    # Tab-Indizes mit Lazy-Loading (max. 30 Einträge initial)
+    _LAZY_TABS = {0, 2, 3}
+    _LAZY_LIMIT = 30
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tab_eintraege: list[list[dict]] = [[] for _ in self._TABS]
         self._tab_tables:    list[QTableWidget] = []
+        self._mehr_btns:     list[QPushButton | None] = []
         self._build_ui()
         self._auto_import_if_needed()
 
@@ -346,13 +351,21 @@ class TelefonnummernWidget(QWidget):
             "QTabBar::tab:selected { font-weight: bold; color: #1565a8; }"
         )
 
-        for label, _ in self._TABS:
+        for i, (label, _) in enumerate(self._TABS):
             table = self._make_table()
             self._tab_tables.append(table)
             container = QWidget()
             vl = QVBoxLayout(container)
             vl.setContentsMargins(0, 4, 0, 0)
             vl.addWidget(table)
+            if i in self._LAZY_TABS:
+                mehr_btn = _btn_light("▼  Mehr anzeigen …")
+                mehr_btn.hide()
+                mehr_btn.clicked.connect(lambda _, ti=i: self._mehr_anzeigen(ti))
+                self._mehr_btns.append(mehr_btn)
+                vl.addWidget(mehr_btn)
+            else:
+                self._mehr_btns.append(None)
             self._tab_widget.addTab(container, label)
 
         self._tab_widget.currentChanged.connect(self._auswahl_geaendert)
@@ -403,10 +416,24 @@ class TelefonnummernWidget(QWidget):
                 eintraege = []
 
             self._tab_eintraege[idx] = eintraege
-            table = self._tab_tables[idx]
-            table.setRowCount(len(eintraege))
 
-            for row, e in enumerate(eintraege):
+            # Für Lazy-Tabs nur die ersten _LAZY_LIMIT Einträge anzeigen
+            if idx in self._LAZY_TABS:
+                anzeige = eintraege[:self._LAZY_LIMIT]
+                mehr_btn = self._mehr_btns[idx]
+                rest = len(eintraege) - self._LAZY_LIMIT
+                if rest > 0:
+                    mehr_btn.setText(f"▼  Mehr anzeigen ({rest} weitere)")
+                    mehr_btn.show()
+                else:
+                    mehr_btn.hide()
+            else:
+                anzeige = eintraege
+
+            table = self._tab_tables[idx]
+            table.setRowCount(len(anzeige))
+
+            for row, e in enumerate(anzeige):
                 cols = [
                     e.get("kategorie", ""),
                     e.get("bezeichnung", ""),
@@ -428,6 +455,32 @@ class TelefonnummernWidget(QWidget):
 
         self._treffer_lbl.setText(f"{total} Einträge")
         self._auswahl_geaendert()
+
+    def _mehr_anzeigen(self, tab_idx: int):
+        """Zeigt alle noch nicht angezeigten Einträge für den Lazy-Tab an."""
+        eintraege = self._tab_eintraege[tab_idx]
+        table = self._tab_tables[tab_idx]
+        start = table.rowCount()
+        total = len(eintraege)
+        table.setRowCount(total)
+        for row in range(start, total):
+            e = eintraege[row]
+            cols = [
+                e.get("kategorie", ""),
+                e.get("bezeichnung", ""),
+                e.get("nummer", ""),
+                e.get("email", "") or "",
+                e.get("bemerkung", "") or "",
+            ]
+            for col, text in enumerate(cols):
+                item = QTableWidgetItem(str(text))
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                )
+                if e.get("quelle") == "Manuell":
+                    item.setBackground(QColor("#fff8e1"))
+                table.setItem(row, col, item)
+        self._mehr_btns[tab_idx].hide()
 
     def refresh(self):
         self._lade()

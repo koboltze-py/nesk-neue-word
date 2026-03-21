@@ -8,7 +8,7 @@ import sys
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QLineEdit, QSizePolicy, QMessageBox
+    QFrame, QScrollArea, QLineEdit, QSizePolicy, QMessageBox, QInputDialog
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -42,9 +42,10 @@ def _icon_for(name: str):
 class _FileItem(QFrame):
     """Einzelne Datei-Zeile im Browser."""
 
-    def __init__(self, path: str, name: str, parent=None):
+    def __init__(self, path: str, name: str, with_copy_count: bool = False, parent=None):
         super().__init__(parent)
         self._path = path
+        self._with_copy_count = with_copy_count
         self._build(name)
 
     def _build(self, name: str):
@@ -116,13 +117,26 @@ class _FileItem(QFrame):
             QMessageBox.warning(self, "Fehler", f"Kann Datei nicht öffnen:\n{e}")
 
     def _drucken(self):
-        try:
-            if sys.platform == "win32":
-                os.startfile(self._path, "print")
-            else:
-                subprocess.Popen(["lp", self._path])
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Drucken nicht möglich:\n{e}")
+        if self._with_copy_count:
+            anzahl, ok = QInputDialog.getInt(
+                self, "Anzahl Ausdrucke", "Wie viele Kopien?", 1, 1, 50
+            )
+            if not ok:
+                return
+        else:
+            anzahl = 1
+        import time
+        for i in range(anzahl):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(self._path, "print")
+                else:
+                    subprocess.Popen(["lp", self._path])
+                if i < anzahl - 1:
+                    time.sleep(0.5)
+            except Exception as e:
+                QMessageBox.warning(self, "Fehler", f"Drucken nicht möglich:\n{e}")
+                break
 
 
 class _FolderSection(QFrame):
@@ -253,11 +267,14 @@ class DokumentBrowserWidget(QWidget):
     """
 
     def __init__(self, title: str, folder_path: str,
-                 allow_subfolders: bool = False, parent=None):
+                 allow_subfolders: bool = False,
+                 with_copy_count: bool = False,
+                 parent=None):
         super().__init__(parent)
         self._title = title
         self._folder = folder_path
         self._allow_subfolders = allow_subfolders
+        self._with_copy_count = with_copy_count
         self._sections: list[_FolderSection] = []
         self._flat_items: list[_FileItem] = []
         self._build_ui()
@@ -415,7 +432,7 @@ class DokumentBrowserWidget(QWidget):
             else:
                 for fname in files:
                     path = os.path.join(self._folder, fname)
-                    fi = _FileItem(path, fname)
+                    fi = _FileItem(path, fname, self._with_copy_count)
                     self._flat_items.append(fi)
                     self._content_layout.insertWidget(insert_pos, fi)
                     insert_pos += 1

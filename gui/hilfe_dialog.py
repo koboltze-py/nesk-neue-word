@@ -503,7 +503,7 @@ class HilfeDialog(QDialog):
             "DRK Erste-Hilfe-Station Flughafen Köln/Bonn"
         )
         t2.setFont(QFont("Arial", 10))
-        t2.setStyleSheet("color: rgba(255,255,255,0.75); border: none;")
+        t2.setStyleSheet("color: rgba(255,255,255,191); border: none;")
         left.addStretch()
         left.addWidget(t1)
         left.addWidget(t2)
@@ -511,7 +511,7 @@ class HilfeDialog(QDialog):
 
         self._pulse_icon = _PulseLabel("🏥")
         self._pulse_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._pulse_icon.setStyleSheet("border: none; color: rgba(255,255,255,0.30);")
+        self._pulse_icon.setStyleSheet("border: none; color: rgba(255,255,255,77);")
 
         lay.addLayout(left, 1)
         lay.addWidget(self._pulse_icon)

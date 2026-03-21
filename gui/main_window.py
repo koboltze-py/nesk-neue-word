@@ -140,62 +140,51 @@ class _NeskLogoWidget(QWidget):
 
         p.end()
 from gui.dashboard        import DashboardWidget
-from gui.aufgaben_tag     import AufgabenTagWidget
-from gui.aufgaben         import AufgabenWidget
+from gui.aufgaben_haupt   import AufgabenHauptWidget
 from gui.dienstplan       import DienstplanWidget
 from gui.uebergabe        import UebergabeWidget
 from gui.fahrzeuge        import FahrzeugeWidget
 from gui.einstellungen    import EinstellungenWidget
 from gui.code19           import Code19Widget
-from gui.dokument_browser       import DokumentBrowserWidget
 from gui.mitarbeiter            import MitarbeiterHauptWidget
 from gui.hilfe_dialog           import HilfeDialog
 from gui.dienstliches           import DienstlichesWidget
 from gui.telefonnummern         import TelefonnummernWidget
 from gui.call_transcription     import CallTranscriptionWidget
 from gui.backup_widget          import BackupWidget
-from gui.beschwerden            import BeschwerdenWidget
-from gui.passagieranfragen      import PassagieranfragenWidget
+from gui.passagiere             import PassagiereWidget
 
 
 NAV_ITEMS = [
-    ("🏠", "Dashboard",        0),
-    ("👥", "Mitarbeiter",       1),
-    ("☕️", "Dienstliches",     2),
-    ("☀️", "Aufgaben Tag",     3),
-    ("🌙", "Aufgaben Nacht",   4),
-    ("📅", "Dienstplan",       5),
-    ("📋", "Übergabe",         6),
-    ("🚗", "Fahrzeuge",        7),
-    ("🕐", "Code 19",          8),
-    ("🖨️", "Ma. Ausdrucke",   9),
-    ("🤒", "Krankmeldungen",  10),
-    ("📞", "Telefonnummern",  11),
-    ("♿", "Call Transcription", 12),
-    ("💾", "Backup",          13),
-    ("⚙️",  "Einstellungen",  14),
-    ("📣",  "Beschwerden",    15),
-    ("✉️",  "Passagieranfragen", 16),
+    ("🏠", "Dashboard",          0),
+    ("👥", "Mitarbeiter",         1),
+    ("☕️", "Dienstliches",       2),
+    ("📝", "Aufgaben",            3),
+    ("📅", "Dienstplan",          4),
+    ("📋", "Übergabe",            5),
+    ("🚗", "Fahrzeuge",           6),
+    ("🕐", "Code 19",            7),
+    ("✈️",  "Passagiere",        8),
+    ("📞", "Telefonnummern",      9),
+    ("♿", "Call Transcription",  10),
+    ("💾", "Backup",             11),
+    ("⚙️",  "Einstellungen",    12),
 ]
 
 NAV_TOOLTIPS = [
     "Startseite – Statistiken und Übersicht",
-    "Mitarbeiter-Übersicht (Stamm/Dispo) + Dokumente (Stellungnahmen, Word-Vorlagen)",
+    "Mitarbeiter-Übersicht + Dokumente + Ausdrucke + Krankmeldungen",
     "Dienstliche Protokolle: Einsätze und Berichte",
-    "Tagdienst-Aufgaben, Checklisten und Code-19-Mail",
-    "Nachtdienst-Aufgaben und Code-19-Mail",
+    "Aufgaben Tag (Tagesaufgaben, Checklisten) und Aufgaben Nacht (Checklisten, Sonderaufgaben, AOCC)",
     "Dienstplan laden, anzeigen und Hausverwaltung exportieren",
     "Schichtprotokoll erstellen, ausfüllen und abschließen",
     "Fahrzeugstatus, Schäden und Wartungstermine verwalten",
     "Code-19-Protokoll führen und Uhrzeigen-Animation",
-    "Vordrucke öffnen und drucken (Ordner: Daten/Vordrucke)",
-    "Krankmeldungsformulare öffnen (Ordner: 03_Krankmeldungen)",
+    "Passagieranfragen verarbeiten und Beschwerden erfassen und verwalten",
     "Telefonnummern-Verzeichnis: FKB Gate-/Check-In-Nummern und DRK-Kontakte",
     "Anrufprotokoll: Anrufinhalte mit Textbausteinen schnell erfassen und verwalten",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
-    "Beschwerden erfassen, verwalten und nachverfolgen",
-    "Passagieranfragen verarbeiten, Daten extrahieren und Antworten per Outlook versenden",
 ]
 
 
@@ -232,7 +221,7 @@ class SidebarButton(QPushButton):
                     text-align: left;
                 }}
                 QPushButton:hover {{
-                    background-color: rgba(255,255,255,0.1);
+                    background-color: rgba(255,255,255,25);
                     color: white;
                 }}
             """)
@@ -284,7 +273,7 @@ class MainWindow(QMainWindow):
                 background: transparent; width: 4px; margin: 0;
             }
             QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.25); border-radius: 2px; min-height: 20px;
+                background: rgba(255,255,255,64); border-radius: 2px; min-height: 20px;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
@@ -339,16 +328,16 @@ class MainWindow(QMainWindow):
         self._hilfe_btn.setToolTip("Bedienungsanleitung und Übersicht aller Funktionen öffnen")
         self._hilfe_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255,255,255,0.10);
+                background-color: rgba(255,255,255,26);
                 color: #cdd5e0;
-                border: 1px solid rgba(255,255,255,0.18);
+                border: 1px solid rgba(255,255,255,46);
                 border-radius: 4px;
                 padding: 6px 12px;
                 text-align: left;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: rgba(255,255,255,0.20);
+                background-color: rgba(255,255,255,51);
                 color: white;
             }
         """)
@@ -377,43 +366,26 @@ class MainWindow(QMainWindow):
         self._dashboard_page         = DashboardWidget()
         self._mitarbeiter_page       = MitarbeiterHauptWidget()
         self._dienstliches_page      = DienstlichesWidget()
-        self._aufgaben_tag_page      = AufgabenTagWidget()
-        self._aufgaben_page          = AufgabenWidget()
+        self._aufgaben_haupt_page    = AufgabenHauptWidget()
         self._dienstplan_page        = DienstplanWidget()
         self._uebergabe_page         = UebergabeWidget()
         self._fahrzeuge_page         = FahrzeugeWidget()
         self._code19_page            = Code19Widget()
-
-        _AUSDRUCKE_PATH    = os.path.join(BASE_DIR, "Daten", "Vordrucke")
-        _KRANKMELD_PATH    = os.path.join(
-            os.path.dirname(os.path.dirname(BASE_DIR)), "03_Krankmeldungen"
-        )
-        self._ausdrucke_page     = DokumentBrowserWidget(
-            "🖨 Ma. Ausdrucke – Vordrucke", _AUSDRUCKE_PATH
-        )
-        self._krankmeldungen_page = DokumentBrowserWidget(
-            "🤒 Krankmeldungen", _KRANKMELD_PATH, allow_subfolders=True
-        )
-
-        self._telefonnummern_page = TelefonnummernWidget()
-
+        self._telefonnummern_page    = TelefonnummernWidget()
         self._call_transcription_page = CallTranscriptionWidget()
-        self._backup_page        = BackupWidget()
-        self._settings_page      = EinstellungenWidget()
-        self._beschwerden_page        = BeschwerdenWidget()
-        self._passagieranfragen_page = PassagieranfragenWidget()
+        self._backup_page            = BackupWidget()
+        self._settings_page          = EinstellungenWidget()
+        self._passagiere_page        = PassagiereWidget()
 
         for page in [self._dashboard_page, self._mitarbeiter_page,
                      self._dienstliches_page,
-                     self._aufgaben_tag_page, self._aufgaben_page,
+                     self._aufgaben_haupt_page,
                      self._dienstplan_page, self._uebergabe_page,
                      self._fahrzeuge_page, self._code19_page,
-                     self._ausdrucke_page, self._krankmeldungen_page,
+                     self._passagiere_page,
                      self._telefonnummern_page,
                      self._call_transcription_page,
-                     self._backup_page, self._settings_page,
-                     self._beschwerden_page,
-                     self._passagieranfragen_page]:
+                     self._backup_page, self._settings_page]:
             self._stack.addWidget(page)
 
         layout.addWidget(self._stack)
@@ -498,18 +470,14 @@ class MainWindow(QMainWindow):
             0: self._dashboard_page.refresh,
             1: self._mitarbeiter_page.refresh,
             2: self._dienstliches_page.refresh,
-            3: self._aufgaben_tag_page.refresh,
-            4: self._aufgaben_page.refresh,
-            5: self._dienstplan_page.reload_tree,
-            6: self._uebergabe_page.refresh,
-            7: self._fahrzeuge_page.refresh,
-            8: self._code19_page.refresh,
-            9: self._ausdrucke_page.refresh,
-            10: self._krankmeldungen_page.refresh,
-            11: self._telefonnummern_page.refresh,
-            12: self._call_transcription_page.refresh,
-            15: self._beschwerden_page._load,
-            16: self._passagieranfragen_page.refresh,
+            3: self._aufgaben_haupt_page.refresh,
+            4: self._dienstplan_page.reload_tree,
+            5: self._uebergabe_page.refresh,
+            6: self._fahrzeuge_page.refresh,
+            7: self._code19_page.refresh,
+            8: self._passagiere_page.refresh,
+            9: self._telefonnummern_page.refresh,
+            10: self._call_transcription_page.refresh,
         }
         if index in page_map:
             QTimer.singleShot(0, page_map[index])

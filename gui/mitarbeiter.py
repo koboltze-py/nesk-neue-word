@@ -666,13 +666,14 @@ class MitarbeiterWidget(QWidget):
 # ── Kombiniertes Haupt-Widget (Tab: Übersicht + Dokumente) ─────────────────────
 
 class MitarbeiterHauptWidget(QWidget):
-    """Kombiniertes Widget: Tab 1 = Mitarbeiter-Übersicht, Tab 2 = Dokumente.
-    MitarbeiterDokumenteWidget wird erst beim ersten Klick auf Tab 2 geladen.
-    """
+    """Kombiniertes Widget: Tabs Dokumente, Übersicht, Ausdrucke, Krankmeldungen."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        import os
         from PySide6.QtWidgets import QTabWidget
+        from config import BASE_DIR
+        from gui.dokument_browser import DokumentBrowserWidget
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -700,8 +701,24 @@ class MitarbeiterHauptWidget(QWidget):
         self._dokumente_tab = None
         self._dokumente_placeholder = QWidget()  # leerer Platzhalter
 
+        _AUSDRUCKE_PATH = os.path.join(BASE_DIR, "Daten", "Vordrucke")
+        _KRANKMELD_PATH = os.path.join(
+            os.path.dirname(os.path.dirname(BASE_DIR)), "03_Krankmeldungen"
+        )
+
+        self._ausdrucke_tab = DokumentBrowserWidget(
+            "🖨️  Ausdrucke – Vordrucke", _AUSDRUCKE_PATH,
+            with_copy_count=True
+        )
+        self._krankmeldungen_tab = DokumentBrowserWidget(
+            "🤒  Krankmeldungen", _KRANKMELD_PATH,
+            allow_subfolders=True
+        )
+
         self._tabs.addTab(self._dokumente_placeholder, "📄  Dokumente")
-        self._tabs.addTab(self._uebersicht_tab,       "👥  Übersicht")
+        self._tabs.addTab(self._ausdrucke_tab,         "🖨️  Ausdrucke")
+        self._tabs.addTab(self._krankmeldungen_tab,    "🤒  Krankmeldungen")
+        self._tabs.addTab(self._uebersicht_tab,        "👥  Übersicht")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self._tabs)

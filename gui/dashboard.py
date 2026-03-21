@@ -235,6 +235,16 @@ class DashboardWidget(QWidget):
         self._uhr_timer.start(1000)
         self._uhr_tick()
 
+        # Dienstplan Auto-Refresh alle 5 Minuten
+        self._dp_timer = QTimer(self)
+        self._dp_timer.timeout.connect(self._aktualisiere_dp_panels)
+        self._dp_timer.start(5 * 60 * 1000)
+
+        # Krankmeldungen Auto-Refresh alle 10 Minuten
+        self._km_timer = QTimer(self)
+        self._km_timer.timeout.connect(self._lade_krankmeldungen)
+        self._km_timer.start(10 * 60 * 1000)
+
     # ── UI-Aufbau ─────────────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -283,7 +293,7 @@ class DashboardWidget(QWidget):
                 padding: 4px 8px;
             }
             QCalendarWidget QToolButton:hover {
-                background: rgba(255,255,255,0.20);
+                background: rgba(255,255,255,51);
                 border-radius: 4px;
             }
             QCalendarWidget QSpinBox {
@@ -327,6 +337,64 @@ class DashboardWidget(QWidget):
         scroll.setWidget(self._termin_container)
         linke.addWidget(scroll)
 
+        # Krankmeldungen aktueller Monat
+        from PySide6.QtWidgets import QPushButton as _QPB2
+        km_hdr_row = QHBoxLayout()
+        km_hdr = QLabel("🤒  Krankmeldungen – aktueller Monat")
+        km_hdr.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        km_hdr.setStyleSheet(f"color: {FIORI_TEXT};")
+        km_hdr_row.addWidget(km_hdr)
+        km_hdr_row.addStretch()
+        self._km_ref_btn = _QPB2("🔄")
+        self._km_ref_btn.setToolTip("Krankmeldungen aktualisieren")
+        self._km_ref_btn.setFixedSize(26, 22)
+        self._km_ref_btn.setStyleSheet(
+            "QPushButton { background: #e8f0fe; border: 1px solid #c5d5f5; border-radius: 4px; font-size: 11px; }"
+            " QPushButton:hover { background: #c5d5f5; }"
+        )
+        self._km_ref_btn.clicked.connect(self._lade_krankmeldungen)
+        km_hdr_row.addWidget(self._km_ref_btn)
+        linke.addLayout(km_hdr_row)
+
+        self._km_status_lbl = QLabel("Wird geladen …")
+        self._km_status_lbl.setStyleSheet("color: #888; font-size: 11px; font-style: italic;")
+        linke.addWidget(self._km_status_lbl)
+
+        from PySide6.QtWidgets import QTableWidget, QHeaderView as _QHV
+        self._km_table = QTableWidget()
+        self._km_table.setColumnCount(4)
+        self._km_table.setHorizontalHeaderLabels(["Name", "Von", "Bis", "Bemerkungen"])
+        km_hh = self._km_table.horizontalHeader()
+        km_hh.setSectionResizeMode(0, _QHV.ResizeMode.ResizeToContents)
+        km_hh.setSectionResizeMode(1, _QHV.ResizeMode.ResizeToContents)
+        km_hh.setSectionResizeMode(2, _QHV.ResizeMode.ResizeToContents)
+        km_hh.setSectionResizeMode(3, _QHV.ResizeMode.Stretch)
+        self._km_table.verticalHeader().setVisible(False)
+        self._km_table.verticalHeader().setDefaultSectionSize(18)
+        self._km_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._km_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._km_table.setAlternatingRowColors(True)
+        self._km_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                border-radius: 6px;
+                font-size: 12px;
+                gridline-color: #e8ecf0;
+            }
+            QTableWidget::item { padding: 0px 4px; }
+            QHeaderView::section {
+                background-color: #f0f4f8;
+                border: none;
+                border-bottom: 1px solid #c8d4e0;
+                padding: 2px 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+        self._km_table.setMinimumHeight(120)
+        self._km_table.setMaximumHeight(280)
+        linke.addWidget(self._km_table)
+
         linke.addStretch()
         outer.addLayout(linke, 6)
 
@@ -365,7 +433,95 @@ class DashboardWidget(QWidget):
         )
         rechte.addWidget(self._db_status_lbl)
 
-        rechte.addStretch()
+        # Dienstplan-Panels (heute, im Nachtdienst auch gestern)
+        from PySide6.QtWidgets import QPushButton, QTableWidget, QHeaderView
+
+        _TBL_STYLE = """
+            QTableWidget {
+                background-color: white;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                gridline-color: #e8ecf0;
+            }
+            QTableWidget::item { padding: 0px 4px; }
+            QHeaderView::section {
+                background-color: #f0f4f8;
+                border: none;
+                border-bottom: 1px solid #c8d4e0;
+                padding: 2px 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """
+
+        def _make_dp_panel(titel: str) -> QWidget:
+            panel = QWidget()
+            pv = QVBoxLayout(panel)
+            pv.setContentsMargins(0, 0, 0, 0)
+            pv.setSpacing(4)
+            hdr_row = QHBoxLayout()
+            hdr_row.setContentsMargins(0, 0, 0, 0)
+            hdr_lbl = QLabel(titel)
+            hdr_lbl.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+            hdr_lbl.setStyleSheet(f"color: {FIORI_TEXT};")
+            hdr_row.addWidget(hdr_lbl)
+            hdr_row.addStretch()
+            ref_btn = QPushButton("🔄 Aktualisieren")
+            ref_btn.setFixedHeight(26)
+            ref_btn.setStyleSheet(
+                "QPushButton { font-size: 11px; padding: 2px 10px; "
+                "background: #e8f0fa; color: #1565a8; border: 1px solid #b3c8e8; "
+                "border-radius: 4px; } "
+                "QPushButton:hover { background: #c8daf5; } "
+                "QPushButton:pressed { background: #a8c0e8; }"
+            )
+            hdr_row.addWidget(ref_btn)
+            pv.addLayout(hdr_row)
+            status_lbl = QLabel("Wird geladen …")
+            status_lbl.setStyleSheet("color: #888; font-size: 11px; font-style: italic;")
+            pv.addWidget(status_lbl)
+            tbl = QTableWidget()
+            tbl.setColumnCount(5)
+            tbl.setHorizontalHeaderLabels(["Kategorie", "Name", "Dienst", "Von", "Bis"])
+            hh_tbl = tbl.horizontalHeader()
+            hh_tbl.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            hh_tbl.setStretchLastSection(False)
+            hh_tbl.setMinimumSectionSize(40)
+            tbl.verticalHeader().setVisible(False)
+            tbl.verticalHeader().setDefaultSectionSize(18)
+            tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            tbl.setAlternatingRowColors(True)
+            tbl.setStyleSheet(_TBL_STYLE)
+            pv.addWidget(tbl, 1)
+            count_lbl = QLabel("")
+            count_lbl.setFont(QFont("Arial", 9))
+            count_lbl.setWordWrap(True)
+            count_lbl.setStyleSheet("color: #555; font-weight: bold; padding: 2px 0;")
+            pv.addWidget(count_lbl)
+            panel._ref_btn    = ref_btn
+            panel._status_lbl = status_lbl
+            panel._table      = tbl
+            panel._count_lbl  = count_lbl
+            return panel
+
+        dp_area = QHBoxLayout()
+        dp_area.setContentsMargins(0, 0, 0, 0)
+        dp_area.setSpacing(12)
+
+        # Gestern links (älteres Datum), Heute rechts — gestern im Normalfall versteckt
+        self._dp_panel_gestern = _make_dp_panel("📅  Gestriger Dienstplan")
+        self._dp_panel_gestern._ref_btn.clicked.connect(self._aktualisiere_dp_panels)
+        self._dp_panel_gestern.setVisible(False)
+        dp_area.addWidget(self._dp_panel_gestern, 1)
+
+        self._dp_panel_heute = _make_dp_panel("📅  Heutiger Dienstplan")
+        self._dp_panel_heute._ref_btn.clicked.connect(self._aktualisiere_dp_panels)
+        dp_area.addWidget(self._dp_panel_heute, 1)
+
+        rechte.addLayout(dp_area, 1)
+
         outer.addLayout(rechte, 4)
 
     # ── Uhr ───────────────────────────────────────────────────────────────
@@ -584,6 +740,244 @@ class DashboardWidget(QWidget):
             mehr.setStyleSheet("color: #888; font-size: 11px; padding: 2px 4px;")
             self._termin_layout.addWidget(mehr)
 
+    # ── Heutiger Dienstplan ─────────────────────────────────────────────────
+
+    _MONATSORDNER = {
+        1: "01_Januar",  2: "02_Februar",  3: "03_März",
+        4: "04_April",   5: "05_Mai",      6: "06_Juni",
+        7: "07_July",    8: "08_August",   9: "09_September",
+        10: "10_Oktober", 11: "11_November", 12: "12_Dezember",
+    }
+
+    def _aktualisiere_dp_panels(self):
+        """Lädt den heutigen Plan (immer) und den gestrigen Plan (00:01–07:00 Uhr)."""
+        from datetime import date as _date, timedelta
+        jetzt = QTime.currentTime()
+        ms = jetzt.msecsSinceStartOfDay()
+        nachts = QTime(0, 1).msecsSinceStartOfDay() <= ms <= QTime(7, 0).msecsSinceStartOfDay()
+        self._dp_panel_gestern.setVisible(nachts)
+        heute = _date.today()
+        self._lade_dienstplan_fuer_datum(heute, self._dp_panel_heute)
+        if nachts:
+            self._lade_dienstplan_fuer_datum(heute - timedelta(days=1), self._dp_panel_gestern)
+
+    def _lade_dienstplan_fuer_datum(self, datum, panel):
+        from PySide6.QtWidgets import QTableWidgetItem
+        import os
+
+        _TAG_DIENSTE   = frozenset({'T', 'T10', 'T8', 'DT', 'DT3'})
+        _NACHT_DIENSTE = frozenset({'N', 'N10', 'NF', 'DN', 'DN3'})
+        STATIONSLEITUNG = {'lars peters'}
+
+        tbl        = panel._table
+        status_lbl = panel._status_lbl
+        count_lbl  = panel._count_lbl
+
+        tbl.clearSpans()
+        tbl.setRowCount(0)
+        try:
+            from functions.settings_functions import get_setting
+            basis = get_setting("dienstplan_ordner")
+        except Exception:
+            basis = ""
+
+        if not basis or not os.path.isdir(basis):
+            status_lbl.setText("⚠️  Dienstplan-Ordner nicht gefunden.")
+            count_lbl.setText("")
+            return
+
+        monatsordner = self._MONATSORDNER.get(datum.month, "")
+        dateiname = datum.strftime("%d.%m.%Y") + ".xlsx"
+        pfad = os.path.join(basis, monatsordner, dateiname)
+
+        if not os.path.isfile(pfad):
+            status_lbl.setText(f"📂  Keine Datei für {dateiname} vorhanden.")
+            count_lbl.setText("")
+            return
+
+        try:
+            from functions.dienstplan_parser import DienstplanParser
+            data = DienstplanParser(pfad, alle_anzeigen=True).parse()
+        except Exception as exc:
+            status_lbl.setText(f"⚠️  Fehler beim Lesen: {exc}")
+            count_lbl.setText("")
+            return
+
+        if not data.get("success"):
+            status_lbl.setText("⚠️  Dienstplan konnte nicht verarbeitet werden.")
+            count_lbl.setText("")
+            return
+
+        datum_str = data.get("datum") or datum.strftime("%d.%m.%Y")
+        status_lbl.setText(f"Dienstplan vom {datum_str}")
+
+        # ── Personen nach Schichttyp aufteilen ──────────────────────────────
+        tag_personen   = []
+        nacht_personen = []
+        sonst_personen = []
+
+        for kat, liste in (('Dispo', data.get('dispo', [])),
+                           ('Betreuer', data.get('betreuer', []))):
+            for p in liste:
+                name_lower = p.get('vollname', p.get('anzeigename', '')).strip().lower()
+                effekt_kat = 'Stationsleitung' if name_lower in STATIONSLEITUNG else kat
+                dk = (p.get('dienst_kategorie') or '').upper()
+                if dk in _TAG_DIENSTE:
+                    tag_personen.append((effekt_kat, p))
+                elif dk in _NACHT_DIENSTE:
+                    nacht_personen.append((effekt_kat, p))
+                else:
+                    sonst_personen.append((effekt_kat, p))
+
+        # ── Kranke nach Schichttyp + Dispo/Betreuer ──────────────────────────
+        krank_tag_dispo   = []
+        krank_tag_betr    = []
+        krank_nacht_dispo = []
+        krank_nacht_betr  = []
+        krank_sonder      = []
+
+        for p in data.get('kranke', []):
+            stype = p.get('krank_schicht_typ') or 'sonderdienst'
+            is_d  = p.get('krank_ist_dispo', False)
+            if stype == 'tagdienst':
+                (krank_tag_dispo if is_d else krank_tag_betr).append(p)
+            elif stype == 'nachtdienst':
+                (krank_nacht_dispo if is_d else krank_nacht_betr).append(p)
+            else:
+                krank_sonder.append(p)
+
+        krank_tag_personen    = ([('KrankDispo', p) for p in krank_tag_dispo] +
+                                 [('Krank',      p) for p in krank_tag_betr])
+        krank_nacht_personen  = ([('KrankDispo', p) for p in krank_nacht_dispo] +
+                                 [('Krank',      p) for p in krank_nacht_betr])
+        krank_sonder_personen = [('Krank', p) for p in krank_sonder]
+
+        abschnitte = []
+        if tag_personen:
+            abschnitte.append(('☀️ Tagdienst',           '#1565a8', tag_personen))
+        if nacht_personen:
+            abschnitte.append(('🌙 Nachtdienst',          '#0d2b4a', nacht_personen))
+        if sonst_personen:
+            abschnitte.append(('📋 Sonstige',             '#555555', sonst_personen))
+        if krank_tag_personen:
+            abschnitte.append(('🤒 Krank – Tagdienst',   '#8b0000', krank_tag_personen))
+        if krank_nacht_personen:
+            abschnitte.append(('🤒 Krank – Nachtdienst', '#5a0000', krank_nacht_personen))
+        if krank_sonder_personen:
+            abschnitte.append(('🤒 Krank – Sonder',      '#6b3300', krank_sonder_personen))
+
+        total_rows = sum(1 + len(personen) for _, _, personen in abschnitte)
+        tbl.clearSpans()
+        tbl.setRowCount(total_rows)
+
+        farben = {
+            'Dispo':           QColor('#dce8f5'),
+            'Betreuer':        QColor('#ffffff'),
+            'Stationsleitung': QColor('#fff8e1'),
+            'Krank':           QColor('#fce8e8'),
+            'KrankDispo':      QColor('#f0d0d0'),
+        }
+        text_farben = {
+            'Dispo':           QColor('#0a5ba4'),
+            'Betreuer':        QColor('#1a1a1a'),
+            'Stationsleitung': QColor('#7a5000'),
+            'Krank':           QColor('#bb0000'),
+            'KrankDispo':      QColor('#7a0000'),
+        }
+
+        row = 0
+        sep_font = QFont('Arial', 10, QFont.Weight.Bold)
+        for label_text, hdr_bg, personen in abschnitte:
+            tbl.setSpan(row, 0, 1, 5)
+            sep_item = QTableWidgetItem(label_text)
+            sep_item.setBackground(QColor(hdr_bg))
+            sep_item.setForeground(QColor('#ffffff'))
+            sep_item.setFont(sep_font)
+            sep_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            tbl.setItem(row, 0, sep_item)
+            tbl.verticalHeader().resizeSection(row, 24)
+            row += 1
+
+            for kategorie, p in personen:
+                bg = farben.get(kategorie, QColor('#ffffff'))
+                fg = text_farben.get(kategorie, QColor('#1a1a1a'))
+                kat_anzeige = ('Dispo' if kategorie == 'KrankDispo'
+                               else ('Betreuer' if kategorie == 'Krank' else kategorie))
+                dienst_anzeige = (
+                    p.get('krank_abgeleiteter_dienst') or p.get('dienst_kategorie') or ''
+                    if p.get('ist_krank') else p.get('dienst_kategorie') or ''
+                )
+                vals = [
+                    kat_anzeige,
+                    p.get('anzeigename', ''),
+                    dienst_anzeige,
+                    p.get('start_zeit', '') or '',
+                    p.get('end_zeit',   '') or '',
+                ]
+                for col, val in enumerate(vals):
+                    item = QTableWidgetItem(str(val))
+                    item.setBackground(bg)
+                    item.setForeground(fg)
+                    tbl.setItem(row, col, item)
+                if p.get('ist_bulmorfahrer'):
+                    for col in range(5):
+                        it = tbl.item(row, col)
+                        if it:
+                            it.setBackground(QColor('#fff3b0'))
+                row += 1
+
+        # ── Statuszeile ──────────────────────────────────────────────────────
+        tag_n   = len(tag_personen)
+        nacht_n = len(nacht_personen)
+        sonst_n = len(sonst_personen)
+        tag_dispo_n   = sum(1 for k, _ in tag_personen   if k == 'Dispo')
+        nacht_dispo_n = sum(1 for k, _ in nacht_personen if k == 'Dispo')
+        tag_betr_n    = tag_n - tag_dispo_n
+        nacht_betr_n  = nacht_n - nacht_dispo_n
+        n_kd_tag   = len(krank_tag_dispo)
+        n_kb_tag   = len(krank_tag_betr)
+        n_kd_nacht = len(krank_nacht_dispo)
+        n_kb_nacht = len(krank_nacht_betr)
+        n_k_sonder = len(krank_sonder)
+        krank_gesamt = n_kd_tag + n_kb_tag + n_kd_nacht + n_kb_nacht + n_k_sonder
+
+        teile = []
+        if tag_n:
+            tag_sub = []
+            if tag_betr_n:  tag_sub.append(f'Betreuer {tag_betr_n}')
+            if tag_dispo_n: tag_sub.append(f'Dispo {tag_dispo_n}')
+            teile.append(
+                f'{tag_n} Tagdienst ({", ".join(tag_sub)})' if tag_sub else f'{tag_n} Tagdienst'
+            )
+        if nacht_n:
+            nacht_sub = []
+            if nacht_betr_n:  nacht_sub.append(f'Betreuer {nacht_betr_n}')
+            if nacht_dispo_n: nacht_sub.append(f'Dispo {nacht_dispo_n}')
+            teile.append(
+                f'{nacht_n} Nachtdienst ({", ".join(nacht_sub)})' if nacht_sub
+                else f'{nacht_n} Nachtdienst'
+            )
+        if sonst_n:
+            teile.append(f'{sonst_n} Sonstige')
+        if krank_gesamt:
+            betr_teile = []
+            if n_kb_tag:   betr_teile.append(f'{n_kb_tag} Tag')
+            if n_kb_nacht: betr_teile.append(f'{n_kb_nacht} Nacht')
+            if n_k_sonder: betr_teile.append(f'{n_k_sonder} Sonder')
+            betr_gesamt = n_kb_tag + n_kb_nacht + n_k_sonder
+            dispo_teile = []
+            if n_kd_tag:   dispo_teile.append(f'{n_kd_tag} Tag')
+            if n_kd_nacht: dispo_teile.append(f'{n_kd_nacht} Nacht')
+            dispo_gesamt = n_kd_tag + n_kd_nacht
+            krank_blocks = []
+            if betr_gesamt:
+                krank_blocks.append(f'Betreuer {betr_gesamt} ({" / ".join(betr_teile)})')
+            if dispo_gesamt:
+                krank_blocks.append(f'Dispo {dispo_gesamt} ({" / ".join(dispo_teile)})')
+            teile.append(f'{krank_gesamt} Krank  –  {" | ".join(krank_blocks)}')
+
+        count_lbl.setText('  |  '.join(teile) if teile else '0 Einträge')
+
     # ── Refresh ───────────────────────────────────────────────────────────
 
     def refresh(self):
@@ -611,6 +1005,101 @@ class DashboardWidget(QWidget):
         self._termine = self._lade_fahrzeug_termine()
         self._markiere_termine()
         self._zeige_termine_liste()
+
+        # Krankmeldungen aktueller Monat
+        self._lade_krankmeldungen()
+
+        # Dienstplan
+        self._aktualisiere_dp_panels()
+
+    # ── Krankmeldungen ────────────────────────────────────────────────────
+
+    _KM_BASIS = (
+        r"C:\Users\DRKairport\OneDrive - Deutsches Rotes Kreuz - Kreisverband Köln e.V"
+        r"\Dateien von Erste-Hilfe-Station-Flughafen - DRK Köln e.V_ - !Gemeinsam.26"
+        r"\03_Krankmeldungen"
+    )
+
+    def _lade_krankmeldungen(self):
+        from datetime import date as _date
+        from PySide6.QtWidgets import QTableWidgetItem
+        import glob, os
+
+        heute = _date.today()
+        jahr_ordner = os.path.join(self._KM_BASIS, str(heute.year))
+        if not os.path.isdir(jahr_ordner):
+            self._km_status_lbl.setText(f"⚠️  Ordner {heute.year} nicht gefunden.")
+            self._km_table.setRowCount(0)
+            return
+
+        muster = os.path.join(jahr_ordner, f"{heute.month:02d}_*.xlsm")
+        treffer = glob.glob(muster)
+        if not treffer:
+            self._km_status_lbl.setText(
+                f"📂  Keine Datei für {heute.month:02d}/{heute.year} gefunden."
+            )
+            self._km_table.setRowCount(0)
+            return
+
+        pfad = treffer[0]
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(pfad, read_only=True, data_only=True, keep_vba=False)
+            ws = wb.active
+            rows = list(ws.iter_rows(min_row=2, values_only=True))
+            wb.close()
+        except Exception as exc:
+            self._km_status_lbl.setText(f"⚠️  Fehler beim Lesen: {exc}")
+            self._km_table.setRowCount(0)
+            return
+
+        # Nur Zeilen mit mindestens einem Namen
+        eintraege = [r for r in rows if r and r[1]]
+
+        if not eintraege:
+            self._km_status_lbl.setText("Keine Einträge vorhanden.")
+            self._km_table.setRowCount(0)
+            return
+
+        dateiname = os.path.basename(pfad)
+        self._km_status_lbl.setText(
+            f"Aus: {dateiname}  –  {len(eintraege)} Eintrag/Einträge"
+        )
+
+        self._km_table.setRowCount(len(eintraege))
+        for row_i, r in enumerate(eintraege):
+            # r: (Datum, Meldender, Krank von, Krank bis, Anruf um, Angenommen von, Bemerkungen, ...)
+            name    = str(r[1]) if r[1] is not None else ""
+            von_raw = r[2]
+            bis_raw = r[3]
+            bem     = str(r[6]) if len(r) > 6 and r[6] is not None else ""
+
+            def _fmt_date(v):
+                if v is None:
+                    return ""
+                if hasattr(v, "strftime"):
+                    return v.strftime("%d.%m.")
+                return str(v)
+
+            von_str = _fmt_date(von_raw)
+            bis_str = _fmt_date(bis_raw)
+
+            # Farbe: Krankmeldung die noch läuft (bis >= heute) → leicht rot
+            laeuft_noch = False
+            if hasattr(bis_raw, "date"):
+                laeuft_noch = bis_raw.date() >= heute
+            elif isinstance(bis_raw, _date):
+                laeuft_noch = bis_raw >= heute
+
+            bg = QColor("#fce8e8") if laeuft_noch else QColor("#ffffff")
+            fg = QColor("#bb0000") if laeuft_noch else QColor("#1a1a1a")
+
+            self._km_table.setRowHeight(row_i, 18)
+            for col_i, text in enumerate([name, von_str, bis_str, bem]):
+                item = QTableWidgetItem(text)
+                item.setBackground(bg)
+                item.setForeground(fg)
+                self._km_table.setItem(row_i, col_i, item)
 
     def get_termine(self) -> list[dict]:
         """Gibt die zuletzt geladenen Fahrzeug-Termine zurück (für badge/popup)."""

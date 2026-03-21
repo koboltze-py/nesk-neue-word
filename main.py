@@ -204,10 +204,12 @@ def main():
             color: #000000;
         }
         QToolTip {
-            color: #000000;
-            background-color: #FFFFC4;
-            border: 1px solid #C0C0C0;
+            color: #ffffff;
+            background-color: #1b3a5c;
+            border: 1px solid #4a6480;
+            border-radius: 4px;
             font-size: 9pt;
+            padding: 4px 8px;
         }
     """)
 
