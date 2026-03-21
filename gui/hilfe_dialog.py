@@ -447,15 +447,24 @@ class HilfeDialog(QDialog):
         self._tabs.setStyleSheet("""
             QTabWidget::pane { border: none; background: #f5f6f7; }
             QTabBar::tab {
-                padding: 10px 22px; font-size: 12px; font-family: Arial;
-                background: #e8ecf0; color: #555;
+                padding: 10px 22px;
+                font-size: 12px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: #e8ecf0;
                 border-bottom: 3px solid transparent;
+                margin-right: 2px;
             }
             QTabBar::tab:selected {
-                background: #f5f6f7; color: #0a73c4;
-                border-bottom: 3px solid #0a73c4; font-weight: bold;
+                background: #f5f6f7;
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 3px solid #1565a8;
             }
-            QTabBar::tab:hover { background: #dde3ea; }
+            QTabBar::tab:hover:!selected {
+                background: #dde3ea;
+                color: #1565a8;
+            }
         """)
 
         self._tabs.addTab(self._tab_uebersicht(),   "🏠  Übersicht")

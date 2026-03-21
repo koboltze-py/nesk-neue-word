@@ -383,6 +383,29 @@ class _ImportDialog(QDialog):
 
         # === Tabs: Freitext | Word | PDF ===
         self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabWidget::pane { border: none; background: #f8f9fa; }
+            QTabBar::tab {
+                padding: 8px 16px;
+                font-size: 12px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: #e8ecf0;
+                border-bottom: 2px solid transparent;
+                border-radius: 4px 4px 0 0;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #f8f9fa;
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 2px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #dde4ec;
+                color: #1565a8;
+            }
+        """)
         self._tabs.currentChanged.connect(self._on_tab_change)
 
         # ── Tab 0: Freitext ──
@@ -2181,11 +2204,29 @@ class BeschwerdenWidget(QWidget):
         lay.setSpacing(0)
 
         self._detail_tabs = QTabWidget()
-        self._detail_tabs.setStyleSheet(
-            "QTabWidget::pane { border: 1px solid #ddd; border-radius:4px; }"
-            "QTabBar::tab { padding:4px 14px; font-size:11px; }"
-            "QTabBar::tab:selected { font-weight:bold; }"
-        )
+        self._detail_tabs.setStyleSheet("""
+            QTabWidget::pane { border: none; background: #f8f9fa; }
+            QTabBar::tab {
+                padding: 6px 14px;
+                font-size: 11px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: #e8ecf0;
+                border-bottom: 2px solid transparent;
+                border-radius: 4px 4px 0 0;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #f8f9fa;
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 2px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #dde4ec;
+                color: #1565a8;
+            }
+        """)
 
         # ── Tab 0: Originaltext ────────────────────────────────────────────
         ow = QWidget()

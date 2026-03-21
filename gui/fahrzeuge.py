@@ -761,10 +761,29 @@ class FahrzeugeWidget(QWidget):
 
         # Tabs
         tabs = QTabWidget()
+        tabs.setDocumentMode(False)
         tabs.setStyleSheet("""
-            QTabWidget::pane{border:none;background:white;}
-            QTabBar::tab{padding:8px 18px;font-size:12px;}
-            QTabBar::tab:selected{font-weight:bold;border-bottom:2px solid #0a6ed1;color:#0a6ed1;}
+            QTabWidget::pane { border: none; background: #f8f9fa; }
+            QTabBar::tab {
+                padding: 8px 18px;
+                font-size: 12px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: #e8ecf0;
+                border-bottom: 2px solid transparent;
+                border-radius: 4px 4px 0 0;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #f8f9fa;
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 2px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #dde4ec;
+                color: #1565a8;
+            }
         """)
         tabs.addTab(self._tab_stammdaten(f),      "📋 Stammdaten")
         tabs.addTab(self._tab_status(fid, stat_key), "🚦 Status")

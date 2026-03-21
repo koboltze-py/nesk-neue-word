@@ -666,14 +666,11 @@ class MitarbeiterWidget(QWidget):
 # ── Kombiniertes Haupt-Widget (Tab: Übersicht + Dokumente) ─────────────────────
 
 class MitarbeiterHauptWidget(QWidget):
-    """Kombiniertes Widget: Tabs Dokumente, Übersicht, Ausdrucke, Krankmeldungen."""
+    """Kombiniertes Widget: Tabs Verwaltung, Übersicht."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        import os
         from PySide6.QtWidgets import QTabWidget
-        from config import BASE_DIR
-        from gui.dokument_browser import DokumentBrowserWidget
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -686,51 +683,43 @@ class MitarbeiterHauptWidget(QWidget):
                 min-width: 160px;
                 padding: 10px 20px;
                 font-size: 13px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+                margin-right: 4px;
             }
             QTabBar::tab:selected {
-                background: white;
                 color: #1565a8;
                 font-weight: bold;
-                border-bottom: 2px solid #1565a8;
+                border-bottom: 3px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #1565a8;
+                border-bottom: 3px solid #ccddf5;
             }
         """)
 
         self._uebersicht_tab = MitarbeiterWidget()
 
-        # Dokumente-Tab: erst beim ersten Klick laden (Lazy Loading)
+        # Verwaltung-Tab: erst beim ersten Klick laden (Lazy Loading)
         self._dokumente_tab = None
         self._dokumente_placeholder = QWidget()  # leerer Platzhalter
 
-        _AUSDRUCKE_PATH = os.path.join(BASE_DIR, "Daten", "Vordrucke")
-        _KRANKMELD_PATH = os.path.join(
-            os.path.dirname(os.path.dirname(BASE_DIR)), "03_Krankmeldungen"
-        )
-
-        self._ausdrucke_tab = DokumentBrowserWidget(
-            "🖨️  Ausdrucke – Vordrucke", _AUSDRUCKE_PATH,
-            with_copy_count=True
-        )
-        self._krankmeldungen_tab = DokumentBrowserWidget(
-            "🤒  Krankmeldungen", _KRANKMELD_PATH,
-            allow_subfolders=True
-        )
-
-        self._tabs.addTab(self._dokumente_placeholder, "📄  Dokumente")
-        self._tabs.addTab(self._ausdrucke_tab,         "🖨️  Ausdrucke")
-        self._tabs.addTab(self._krankmeldungen_tab,    "🤒  Krankmeldungen")
+        self._tabs.addTab(self._dokumente_placeholder, "🗂️  Verwaltung")
         self._tabs.addTab(self._uebersicht_tab,        "👥  Übersicht")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self._tabs)
 
     def _on_tab_changed(self, index: int):
-        """Lädt MitarbeiterDokumenteWidget beim ersten Klick auf Tab 0 (Dokumente)."""
+        """Lädt MitarbeiterDokumenteWidget beim ersten Klick auf Tab 0 (Verwaltung)."""
         if index == 0 and self._dokumente_tab is None:
             from gui.mitarbeiter_dokumente import MitarbeiterDokumenteWidget
             self._dokumente_tab = MitarbeiterDokumenteWidget()
             # Platzhalter ersetzen
             self._tabs.removeTab(0)
-            self._tabs.insertTab(0, self._dokumente_tab, "📄  Dokumente")
+            self._tabs.insertTab(0, self._dokumente_tab, "🗂️  Verwaltung")
             self._tabs.setCurrentIndex(0)
 
     def refresh(self):

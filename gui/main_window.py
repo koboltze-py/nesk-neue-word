@@ -12,9 +12,9 @@ import math, time
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFrame, QSizePolicy, QMessageBox,
-    QScrollArea,
+    QScrollArea, QGraphicsOpacityEffect,
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QRectF, QPointF
+from PySide6.QtCore import Qt, QSize, QTimer, QRectF, QPointF, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import (
     QFont, QColor, QPixmap, QPainter, QPen, QBrush,
     QRadialGradient, QLinearGradient, QFontMetricsF,
@@ -464,6 +464,19 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self._nav_buttons):
             btn.setActive(i == index)
         self._stack.setCurrentIndex(index)
+
+        # Fade-In Animation der neuen Seite
+        page = self._stack.currentWidget()
+        if page:
+            effect = QGraphicsOpacityEffect(page)
+            page.setGraphicsEffect(effect)
+            self._fade_anim = QPropertyAnimation(effect, b"opacity")
+            self._fade_anim.setDuration(180)
+            self._fade_anim.setStartValue(0.0)
+            self._fade_anim.setEndValue(1.0)
+            self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._fade_anim.finished.connect(lambda: page.setGraphicsEffect(None))
+            self._fade_anim.start()
 
         # Refresh nach dem Seitenumbruch aufrufen (UI reagiert sofort)
         page_map = {

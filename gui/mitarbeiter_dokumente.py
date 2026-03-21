@@ -1116,7 +1116,15 @@ class MitarbeiterDokumenteWidget(QWidget):
             }
         """)
         for kat in KATEGORIEN:
-            self._kat_list.addItem(f"📁  {kat}")
+            self._kat_list.addItem(f"●  {kat}")
+        # Trennlinie
+        _sep = QListWidgetItem("─" * 24)
+        _sep.setFlags(Qt.ItemFlag.NoItemFlags)
+        from PySide6.QtGui import QColor
+        _sep.setForeground(QColor("#bbb"))
+        self._kat_list.addItem(_sep)
+        self._kat_list.addItem("🖨️  Ausdrucke")
+        self._kat_list.addItem("🤒  Krankmeldungen")
         self._kat_list.setCurrentRow(0)
         self._kat_list.currentRowChanged.connect(self._kategorie_gewaehlt)
         layout.addWidget(self._kat_list, 1)
@@ -1194,16 +1202,27 @@ class MitarbeiterDokumenteWidget(QWidget):
 
         # ── QTabWidget: Tab 0 = Dateien, Tab 1 = Datenbank ───────────────────
         self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
         self._tabs.setStyleSheet("""
-            QTabWidget::pane { border:1px solid #ddd; }
             QTabBar::tab {
-                padding:6px 16px; font-size:12px; min-width:100px;
-                border:1px solid #ddd; border-bottom:none;
-                background:#f5f5f5; color:#555;
-                border-top-left-radius:4px; border-top-right-radius:4px;
+                padding: 10px 16px;
+                font-size: 12px;
+                min-width: 100px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+                margin-right: 4px;
             }
-            QTabBar::tab:selected { background:white; color:#1565a8; font-weight:bold; }
-            QTabBar::tab:hover:!selected { background:#e8f0fb; }
+            QTabBar::tab:selected {
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 3px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #1565a8;
+                border-bottom: 3px solid #ccddf5;
+            }
         """)
         outer.addWidget(self._tabs, 1)
 
@@ -1320,6 +1339,25 @@ class MitarbeiterDokumenteWidget(QWidget):
         # ── TAB 3: PSA-Protokoll ──────────────────────────────────────────────
         self._tabs.addTab(self._build_psa_tab(), "🦺  PSA-Protokoll")
         self._tabs.setTabVisible(3, False)  # nur bei PSA sichtbar
+
+        # ── TAB 4: Ausdrucke (DokumentBrowser) ───────────────────────────────
+        from gui.dokument_browser import DokumentBrowserWidget
+        _ausdrucke_path = os.path.join(BASE_DIR, "Daten", "Vordrucke")
+        self._ausdrucke_browser = DokumentBrowserWidget(
+            "🖨️  Ausdrucke – Vordrucke", _ausdrucke_path
+        )
+        self._tabs.addTab(self._ausdrucke_browser, "🖨️  Ausdrucke")
+        self._tabs.setTabVisible(4, False)
+
+        # ── TAB 5: Krankmeldungen (DokumentBrowser) ──────────────────────────
+        _krankmeld_path = os.path.join(
+            os.path.dirname(os.path.dirname(BASE_DIR)), "03_Krankmeldungen"
+        )
+        self._krankmeldungen_browser = DokumentBrowserWidget(
+            "🤒  Krankmeldungen", _krankmeld_path, allow_subfolders=True
+        )
+        self._tabs.addTab(self._krankmeldungen_browser, "🤒  Krankmeldungen")
+        self._tabs.setTabVisible(5, False)
 
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -2099,14 +2137,14 @@ class MitarbeiterDokumenteWidget(QWidget):
             item = self._kat_list.item(row)
             if item:
                 if kat in ("Verspätung", "PSA"):
-                    item.setText(f"📁  {kat}")
+                    item.setText(f"●  {kat}")
                 else:
-                    item.setText(f"📁  {kat}  ({anzahl})")
+                    item.setText(f"●  {kat}  ({anzahl})")
 
     def _zeige_kategorie(self, kategorie: str):
         """Tabelle mit Dateien der gewählten Kategorie befüllen."""
         self._akt_kategorie = kategorie
-        self._kat_label.setText(f"📁  {kategorie}")
+        self._kat_label.setText(f"●  {kategorie}")
         is_stell  = (kategorie == "Stellungnahmen")
         is_versp  = (kategorie == "Verspätung")
         is_psa    = (kategorie == "PSA")
@@ -2122,6 +2160,8 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._tabs.setTabVisible(0, not is_versp and not is_psa)  # Dateien-Tab ausblenden
         self._tabs.setTabVisible(2, is_versp)
         self._tabs.setTabVisible(3, is_psa)
+        self._tabs.setTabVisible(4, False)
+        self._tabs.setTabVisible(5, False)
         self._antraege_panel.setVisible(is_antrag)
         if is_psa:
             self._tabs.setCurrentIndex(3)
@@ -2163,6 +2203,26 @@ class MitarbeiterDokumenteWidget(QWidget):
     def _kategorie_gewaehlt(self, row: int):
         if 0 <= row < len(KATEGORIEN):
             self._zeige_kategorie(KATEGORIEN[row])
+        elif row == len(KATEGORIEN) + 1:  # Ausdrucke (nach Trennlinie)
+            self._zeige_sonderkategorie(4, "🖨️  Ausdrucke")
+        elif row == len(KATEGORIEN) + 2:  # Krankmeldungen
+            self._zeige_sonderkategorie(5, "🤒  Krankmeldungen")
+
+    def _zeige_sonderkategorie(self, tab_index: int, titel: str):
+        """Sonderkategorie: DokumentBrowser direkt im rechten Bereich zeigen."""
+        self._kat_label.setText(titel)
+        self._btn_neu.setVisible(False)
+        self._btn_stellungnahme.setVisible(False)
+        self._btn_web.setVisible(False)
+        self._btn_verspaetung.setVisible(False)
+        self._btn_psa.setVisible(False)
+        self._btn_word_druck.setVisible(False)
+        self._antraege_panel.setVisible(False)
+        self._datei_filter_frame.setVisible(False)
+        for i in range(6):
+            self._tabs.setTabVisible(i, False)
+        self._tabs.setTabVisible(tab_index, True)
+        self._tabs.setCurrentIndex(tab_index)
 
     def _auswahl_geaendert(self):
         pass  # Öffnen/Bearbeiten/Umbenennen/Löschen nur über Rechtsklick-Menü

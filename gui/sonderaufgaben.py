@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QTreeView, QSplitter, QFileSystemModel, QMenu,
     QInputDialog,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QFont
 
 from config import (
@@ -232,7 +232,7 @@ class SonderaufgabenWidget(QWidget):
         tree_vbox.setSpacing(6)
 
         tree_hdr = QHBoxLayout()
-        tree_lbl = QLabel("📁 Gespeicherte Aufgaben")
+        tree_lbl = QLabel("📁 Dienstpläne")
         tree_lbl.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         tree_lbl.setStyleSheet(f"color: {FIORI_TEXT};")
         tree_hdr.addWidget(tree_lbl)
@@ -272,6 +272,32 @@ class SonderaufgabenWidget(QWidget):
         self._tree_info_lbl.setWordWrap(True)
         self._tree_info_lbl.setStyleSheet("color: #aaa; font-size: 9px; padding: 2px;")
         tree_vbox.addWidget(self._tree_info_lbl)
+
+        # ── Buttons unter dem Baum ────────────────────────────────────────
+        _tree_btn_style = """
+            QPushButton {
+                background: #e8ecf0; color: #354a5e; border: 1px solid #c8d2dc;
+                border-radius: 4px; padding: 5px 10px; font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #dce3ea; }
+        """
+        tree_btns = QHBoxLayout()
+        tree_btns.setSpacing(6)
+
+        btn_ordner = QPushButton("📂 Ordner öffnen")
+        btn_ordner.setStyleSheet(_tree_btn_style)
+        btn_ordner.setToolTip("Sonderaufgaben-Ordner im Explorer öffnen")
+        btn_ordner.clicked.connect(self._open_sonderaufgaben_folder)
+        tree_btns.addWidget(btn_ordner)
+
+        btn_restore = QPushButton("↩️ Wiederherstellen")
+        btn_restore.setStyleSheet(_tree_btn_style)
+        btn_restore.setToolTip("Letzte gespeicherte Sonderaufgaben ins Formular laden")
+        btn_restore.clicked.connect(self._restore_last)
+        tree_btns.addWidget(btn_restore)
+
+        tree_vbox.addLayout(tree_btns)
 
         splitter.addWidget(tree_panel)
 
@@ -933,6 +959,99 @@ class SonderaufgabenWidget(QWidget):
 
         self._tree_info_lbl.setText(folder)
         self._tree_info_lbl.setStyleSheet("color: #aaa; font-size: 9px; padding: 2px;")
+
+    # ── Ordner + Wiederherstellen ─────────────────────────────────────────────
+
+    _SONDERAUFGABEN_DOCS = os.path.join(
+        BASE_DIR, "Backup Data", "Dokumente", "Sonderaufgaben"
+    )
+
+    def _open_sonderaufgaben_folder(self):
+        """Sonderaufgaben-Dokumenten-Ordner im Explorer öffnen."""
+        folder = self._SONDERAUFGABEN_DOCS
+        os.makedirs(folder, exist_ok=True)
+        os.startfile(folder)
+
+    def _restore_last(self):
+        """Neueste gespeicherte Sonderaufgaben-Excel ins Formular laden."""
+        folder = str(TEMPLATE_PATH.parent)
+        if not os.path.isdir(folder):
+            QMessageBox.warning(self, "Fehler", f"Ordner nicht gefunden:\n{folder}")
+            return
+
+        # Alle gespeicherten Sonderaufgaben_*.xlsx finden (nicht die Vorlage)
+        dateien = sorted(
+            [
+                f for f in os.listdir(folder)
+                if f.lower().startswith("sonderaufgaben_")
+                and f.lower().endswith(".xlsx")
+                and f != TEMPLATE_PATH.name
+            ],
+            reverse=True,
+        )
+        if not dateien:
+            QMessageBox.information(
+                self, "Keine Daten",
+                "Es wurden noch keine Sonderaufgaben gespeichert."
+            )
+            return
+
+        # Auswahl-Dialog
+        auswahl, ok = QInputDialog.getItem(
+            self,
+            "↩️ Wiederherstellen",
+            "Gespeicherte Sonderaufgaben auswählen:",
+            dateien,
+            0,
+            False,
+        )
+        if not ok or not auswahl:
+            return
+
+        pfad = os.path.join(folder, auswahl)
+        self._load_from_excel(pfad)
+
+    def _load_from_excel(self, pfad: str):
+        """Werte aus einer gespeicherten Sonderaufgaben-Excel in das Formular laden."""
+        try:
+            import openpyxl
+        except ImportError:
+            QMessageBox.critical(self, "Fehler", "openpyxl nicht installiert!")
+            return
+
+        try:
+            wb = openpyxl.load_workbook(pfad, data_only=True)
+            ws = wb.active
+
+            # Aufgaben-Felder laden
+            for aufgabe, excel_row in _AUFGABEN_MAPPING.items():
+                for schicht, col in (("tag", 3), ("nacht", 5)):
+                    key = f"{aufgabe}_{schicht}"
+                    entry = self._entries.get(key)
+                    if entry:
+                        val = ws.cell(row=excel_row, column=col).value
+                        entry["line"].setText(str(val).strip() if val else "")
+
+            # Service Point C72 laden
+            for key, (row, col) in _SERVICE_MAPPING.items():
+                entry = self._entries.get(key)
+                if entry:
+                    val = ws.cell(row=row, column=col).value
+                    entry["line"].setText(str(val).strip() if val else "")
+
+            # Bemerkung laden
+            bemerkung = ws.cell(row=11, column=1).value
+            self._bemerkung.setPlainText(str(bemerkung).strip() if bemerkung else "")
+
+            wb.close()
+
+            QMessageBox.information(
+                self, "Wiederhergestellt",
+                f"Daten geladen aus:\n{os.path.basename(pfad)}"
+            )
+
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Laden:\n{exc}")
 
     def reload_tree(self):
         """Baum neu aufbauen (nach Speichern oder manuell)."""

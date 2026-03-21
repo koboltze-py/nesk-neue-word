@@ -346,10 +346,27 @@ class TelefonnummernWidget(QWidget):
 
         # ── Tabs mit je einer Tabelle ──────────────────────────────────────────
         self._tab_widget = QTabWidget()
-        self._tab_widget.setStyleSheet(
-            "QTabBar::tab { padding: 6px 18px; font-size: 12px; }"
-            "QTabBar::tab:selected { font-weight: bold; color: #1565a8; }"
-        )
+        self._tab_widget.setDocumentMode(True)
+        self._tab_widget.setStyleSheet("""
+            QTabBar::tab {
+                padding: 10px 18px;
+                font-size: 13px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 3px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #1565a8;
+                border-bottom: 3px solid #ccddf5;
+            }
+        """)
 
         for i, (label, _) in enumerate(self._TABS):
             table = self._make_table()

@@ -123,22 +123,27 @@ class AufgabenWidget(QWidget):
         tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: none;
-                background-color: #f5f6f7;
+                background: #f5f6f7;
             }
             QTabBar::tab {
                 padding: 8px 20px;
-                background-color: #e8edf2;
-                border: none;
-                border-radius: 3px 3px 0 0;
+                font-size: 12px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: #e8ecf0;
+                border-bottom: 2px solid transparent;
+                border-radius: 4px 4px 0 0;
                 margin-right: 2px;
-                font-size: 11pt;
             }
             QTabBar::tab:selected {
-                background-color: white;
+                background: #f5f6f7;
+                color: #1565a8;
                 font-weight: bold;
+                border-bottom: 2px solid #1565a8;
             }
-            QTabBar::tab:hover {
-                background-color: #d0dae4;
+            QTabBar::tab:hover:!selected {
+                background: #dde4ec;
+                color: #1565a8;
             }
         """)
 

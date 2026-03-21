@@ -3752,16 +3752,27 @@ class DienstlichesWidget(QWidget):
 
         # ── Tab-Widget ─────────────────────────────────────────────────────
         self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
         self._tabs.setStyleSheet("""
-            QTabWidget::pane { border:1px solid #ddd; }
             QTabBar::tab {
-                padding:8px 20px; font-size:13px; min-width:120px;
-                border:1px solid #ddd; border-bottom:none;
-                background:#f5f5f5; color:#555;
-                border-top-left-radius:4px; border-top-right-radius:4px;
+                padding: 10px 20px;
+                font-size: 13px;
+                min-width: 120px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+                margin-right: 4px;
             }
-            QTabBar::tab:selected { background:white; color:#1565a8; font-weight:bold; }
-            QTabBar::tab:hover:!selected { background:#e8f0fb; }
+            QTabBar::tab:selected {
+                color: #1565a8;
+                font-weight: bold;
+                border-bottom: 3px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #1565a8;
+                border-bottom: 3px solid #ccddf5;
+            }
         """)
 
         self._einsaetze_tab = _EinsaetzeTab()

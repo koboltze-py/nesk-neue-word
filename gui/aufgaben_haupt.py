@@ -23,12 +23,20 @@ class AufgabenHauptWidget(QWidget):
                 min-width: 180px;
                 padding: 10px 20px;
                 font-size: 13px;
+                font-family: 'Segoe UI';
+                color: #666;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+                margin-right: 4px;
             }
             QTabBar::tab:selected {
-                background: white;
                 color: #1565a8;
                 font-weight: bold;
-                border-bottom: 2px solid #1565a8;
+                border-bottom: 3px solid #1565a8;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #1565a8;
+                border-bottom: 3px solid #ccddf5;
             }
         """)
 
