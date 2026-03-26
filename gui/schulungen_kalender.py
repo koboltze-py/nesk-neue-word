@@ -677,21 +677,27 @@ class _SchulungBearbeitenDialog(QDialog):
             w.setDate(QDate(2000, 1, 1))
             return w
 
-        # Absolviert am – bei "direkt"-Typen weniger relevant, aber immer zeigen
-        self._datum_abs = _date_edit(eintrag.get("datum_absolviert", "") if eintrag else "")
-        form.addRow("Absolviert am *:", self._datum_abs)
-
-        # Gültig bis: bei ablauf="direkt" manuell, bei "intervall" auto + anzeigen, bei "einmalig" ausblenden
+        # Gültig bis: bei ablauf="direkt" (ZÜP, Ärztl.) ist das das Hauptfeld
         self._datum_gb = _date_edit(eintrag.get("gueltig_bis", "") if eintrag else "")
-        if self._ablauf == "intervall":
+
+        if self._ablauf == "direkt":
+            # Gültig bis ist Pflichtfeld; Absolviert am optional
+            form.addRow("Ablaufdatum (Gültig bis) *:", self._datum_gb)
+            self._datum_abs = _date_edit(eintrag.get("datum_absolviert", "") if eintrag else "")
+            form.addRow("Absolviert am (optional):", self._datum_abs)
+        elif self._ablauf == "intervall":
+            # Absolviert am ist Pflichtfeld; Gültig bis wird auto-berechnet
+            self._datum_abs = _date_edit(eintrag.get("datum_absolviert", "") if eintrag else "")
+            form.addRow("Absolviert am *:", self._datum_abs)
             intervall = self._cfg.get("intervall", 1)
             info = QLabel(f"ℹ️  Wird automatisch berechnet: Absolviert + {intervall} Jahr(e)")
             info.setStyleSheet("color:#555;font-size:10px;font-style:italic;")
             form.addRow("Gültig bis:", info)
             self._datum_abs.dateChanged.connect(self._auto_gueltig_bis)
-        elif self._ablauf == "direkt":
-            form.addRow("Gültig bis:", self._datum_gb)
-        # einmalig: kein Gültig-bis-Feld
+        else:
+            # einmalig: nur Absolviert am
+            self._datum_abs = _date_edit(eintrag.get("datum_absolviert", "") if eintrag else "")
+            form.addRow("Absolviert am *:", self._datum_abs)
 
         self._bemerkung = QLineEdit()
         self._bemerkung.setPlaceholderText("Optional …")
@@ -732,25 +738,34 @@ class _SchulungBearbeitenDialog(QDialog):
             aktualisiere_schulungseintrag, speichere_schulungseintrag,
             SCHULUNGSTYPEN_CFG, _berechne_status, _parse_datum
         )
-        abs_str = self._datum_str(self._datum_abs.date())
-        if not abs_str:
-            QMessageBox.warning(self, "Pflichtfeld", "Bitte Datum 'Absolviert am' eingeben.")
-            return
-
-        cfg = SCHULUNGSTYPEN_CFG.get(self._typ, {})
+        cfg    = SCHULUNGSTYPEN_CFG.get(self._typ, {})
         ablauf = cfg.get("ablauf", "einmalig")
 
-        if ablauf == "intervall":
-            intervall = cfg.get("intervall", 1)
+        abs_str = self._datum_str(self._datum_abs.date())
+        gb_str  = self._datum_str(self._datum_gb.date())
+
+        if ablauf == "direkt":
+            # Pflichtfeld: Ablaufdatum
+            if not gb_str:
+                QMessageBox.warning(self, "Pflichtfeld", "Bitte Ablaufdatum (Gültig bis) eingeben.")
+                return
+        elif ablauf == "intervall":
+            # Pflichtfeld: Absolviert am; Gültig bis wird berechnet
+            if not abs_str:
+                QMessageBox.warning(self, "Pflichtfeld", "Bitte Datum 'Absolviert am' eingeben.")
+                return
             d = self._datum_abs.date()
+            intervall = cfg.get("intervall", 1)
             try:
                 gb_date = QDate(d.year() + intervall, d.month(), d.day())
             except Exception:
                 gb_date = QDate(2000, 1, 1)
             gb_str = gb_date.toString("dd.MM.yyyy")
-        elif ablauf == "direkt":
-            gb_str = self._datum_str(self._datum_gb.date())
         else:
+            # einmalig: Absolviert am Pflicht, kein Ablaufdatum
+            if not abs_str:
+                QMessageBox.warning(self, "Pflichtfeld", "Bitte Datum 'Absolviert am' eingeben.")
+                return
             gb_str = ""
 
         gb_obj = _parse_datum(gb_str)
