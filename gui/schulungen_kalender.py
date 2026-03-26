@@ -639,6 +639,12 @@ class SchulungenKalenderWidget(QWidget):
         self._jahr  = date.today().year
         self._monat = date.today().month
         self._build_ui()
+        # Einmaliger Auto-Import beim ersten Start (wenn DB noch leer)
+        try:
+            from functions.schulungen_db import erstimport_wenn_leer
+            erstimport_wenn_leer()
+        except Exception:
+            pass
         self._aktualisieren()
 
     def _build_ui(self):

@@ -607,3 +607,37 @@ def lade_jahre() -> list[int]:
             "SELECT DISTINCT substr(datum,1,4) AS j FROM schulungen_manuell ORDER BY j DESC"
         ).fetchall()
     return [int(r[0]) for r in rows if r[0] and r[0].isdigit()]
+
+
+# ─── Einmaliger Erstimport ────────────────────────────────────────────────────
+
+def erstimport_wenn_leer() -> "tuple[int, int] | None":
+    """
+    Importiert die Stammdaten-Excel automatisch, wenn die Mitarbeiter-Tabelle
+    noch leer ist (erster Programmstart).
+    Pfad: zuerst Setting 'schulungen_excel_pfad', dann Standard _EXCEL_PFAD.
+    Gibt (importiert, uebersprungen) zurück oder None wenn bereits Daten vorhanden.
+    """
+    _init_db()
+    with _connect() as conn:
+        anzahl = conn.execute("SELECT COUNT(*) FROM mitarbeiter").fetchone()[0]
+    if anzahl > 0:
+        return None  # DB bereits befüllt – kein Auto-Import
+
+    # Pfad: Einstellung bevorzugen
+    pfad = ""
+    try:
+        from functions.settings_functions import get_setting
+        pfad = get_setting("schulungen_excel_pfad", "").strip()
+    except Exception:
+        pass
+    if not pfad:
+        pfad = str(_EXCEL_PFAD)
+
+    if not Path(pfad).is_file():
+        return None  # Datei nicht gefunden – still überspringen
+
+    try:
+        return excel_importieren(pfad)
+    except Exception:
+        return None
