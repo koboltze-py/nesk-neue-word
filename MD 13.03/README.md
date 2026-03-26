@@ -3,8 +3,14 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.5.0 (21.03.2026)  
-**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · Ma. Ausdrucke · Krankmeldungen · **Telefonnummern** · Backup · Einstellungen · Hilfe · **Passagieranfragen**
+**Version:** v3.5.1 (21.03.2026)  
+**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · **Passagieranfragen**
+
+### Neu in v3.5.1
+- **Tab-Design harmonisiert**: Alle 11 GUI-Dateien nutzen einheitliches `#1565a8`-Blau, konsistente 3px/2px Underlines, Segoe UI, Hover-States
+- **Fade-Animation**: Sanfter 180ms Fade-In (OutCubic) bei jedem Seitenwechsel in der Sidebar-Navigation
+- **Mitarbeiter – Verwaltung**: Tab „Dokumente“ → „Verwaltung“, Ausdrucke + Krankmeldungen jetzt als Sidebar-Kategorien mit DokumentBrowser
+- **Sonderaufgaben**: Treeview-Header „Dienstpläne“, neuer „Ordner öffnen“-Button, „Wiederherstellen“-Button mit Dateiauswahl lädt gespeicherte Sonderaufgaben zurück ins Formular
 
 ### Neu in v3.5.0
 - **Passagieranfragen** (neues Sidebar-Modul): Outlook-Posteingang direkt in der App lesen, E-Mail auswählen → Daten automatisch extrahieren (Name inkl. Anrede, E-Mail direkt aus Outlook, Flugnummer, Datum)

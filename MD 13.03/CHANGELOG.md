@@ -5,6 +5,47 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 21.03.2026 – v3.5.1
+
+### Tab-Design – Harmonisierung aller GUI-Tabs
+
+#### 11 GUI-Dateien
+- **Einheitliches Tab-Design** über alle Module: `#1565a8` als Primärfarbe, konsistente Hover-States, einheitliche Schriftart Segoe UI
+- **Full-Page-Tabs** (Aufgaben, Passagiere, Mitarbeiter, Dienstliches, Telefonnummern, Dokumente): `setDocumentMode(True)` + 3px Underline
+- **Nested/Dialog-Tabs** (Aufgaben Nacht, Aufgaben Tag, Fahrzeuge, Beschwerden, Hilfe): 2px Underline mit `#e8ecf0`-Hintergrund
+- Ersetzt drei verschiedene Blautöne (`#1565a8`, `#0a6ed1`, `#0a73c4`) durch einheitliches Blau
+
+### Seitennavigation – Fade-Animation
+
+#### `gui/main_window.py`
+- **Sanfte Fade-In-Animation** (180ms, OutCubic) bei jedem Seitenwechsel
+- `QGraphicsOpacityEffect` + `QPropertyAnimation` – Opacity 0→1
+- GraphicsEffect wird nach Animation automatisch entfernt (kein Performance-Impact)
+
+### Mitarbeiter – Verwaltung & Sidebar-Reorganisation
+
+#### `gui/mitarbeiter.py`
+- Tab „Dokumente“ umbenannt in **„🗂️ Verwaltung“**
+- Tabs „Ausdrucke“ und „Krankmeldungen“ als Top-Level-Tabs entfernt
+- Nur noch 2 Tabs: Verwaltung | Übersicht
+- Nicht mehr benötigte Imports entfernt (DokumentBrowserWidget, os, BASE_DIR)
+
+#### `gui/mitarbeiter_dokumente.py`
+- Sidebar: 📁-Emojis durch **● Bullet Points** ersetzt
+- **Trennlinie** nach Kategorien + 2 neue Einträge: 🖨️ Ausdrucke, 🤒 Krankmeldungen
+- **Tab 4 + Tab 5**: Eingebettete `DokumentBrowserWidget`-Instanzen für Ausdrucke (Daten/Vordrucke) und Krankmeldungen (03_Krankmeldungen)
+- Neue Methode `_zeige_sonderkategorie()` für DokumentBrowser-Anzeige
+
+### Sonderaufgaben – Ordner & Wiederherstellen
+
+#### `gui/sonderaufgaben.py`
+- Treeview-Überschrift: „Gespeicherte Aufgaben“ → **„📁 Dienstpläne“**
+- **„📂 Ordner öffnen“**-Button: öffnet `Backup Data/Dokumente/Sonderaufgaben` im Explorer
+- **„↩️ Wiederherstellen“**-Button: Dropdown-Auswahl aller gespeicherten Sonderaufgaben-Dateien, lädt Werte zurück ins Formular
+- Neue Methoden `_restore_last()`, `_load_from_excel()` – liest alle Felder (Aufgaben, Service Point, Bemerkung) aus gespeicherter Excel
+
+---
+
 ## 21.03.2026 – v3.5.0
 
 ### Passagieranfragen – Neues Sidebar-Modul
