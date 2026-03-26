@@ -475,6 +475,62 @@ class EinstellungenWidget(QWidget):
 
         layout.addWidget(grp_archiv)
 
+        # ── Gruppe: Schulungen Excel-Stammdaten ────────────────────────
+        grp_schulung = QGroupBox("📊 Schulungen – Excel-Stammdaten")
+        grp_schulung.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        grp_schulung.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #dce8f5;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding: 12px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+                color: #0a5ba4;
+            }
+        """)
+        grp_schulung_layout = QVBoxLayout(grp_schulung)
+        grp_schulung_layout.setSpacing(8)
+
+        schulung_hint = QLabel(
+            "Pfad zur Excel-Datei mit Mitarbeiter-Stammdaten (Blatt \"laufend\").\n"
+            "Beim ersten Programmstart wird die Datei automatisch in die Datenbank geladen."
+        )
+        schulung_hint.setWordWrap(True)
+        schulung_hint.setStyleSheet("color: #555; font-size: 11px; font-weight: normal;")
+        grp_schulung_layout.addWidget(schulung_hint)
+
+        schulung_row = QHBoxLayout()
+        self._schulung_excel_edit = QLineEdit()
+        self._schulung_excel_edit.setPlaceholderText("Pfad zur Stammdaten-Excel …")
+        self._schulung_excel_edit.setMinimumHeight(32)
+        schulung_row.addWidget(self._schulung_excel_edit, 1)
+
+        schulung_browse_btn = QPushButton("📂 Durchsuchen")
+        schulung_browse_btn.setMinimumHeight(32)
+        schulung_browse_btn.clicked.connect(self._browse_schulungen_excel)
+        schulung_row.addWidget(schulung_browse_btn)
+
+        schulung_import_btn = QPushButton("📥 Jetzt importieren")
+        schulung_import_btn.setMinimumHeight(32)
+        schulung_import_btn.setStyleSheet(
+            f"background-color: {FIORI_BLUE}; color: white; border-radius: 4px;"
+        )
+        schulung_import_btn.clicked.connect(self._schulungen_excel_importieren)
+        schulung_row.addWidget(schulung_import_btn)
+
+        grp_schulung_layout.addLayout(schulung_row)
+
+        self._schulung_import_status = QLabel("")
+        self._schulung_import_status.setStyleSheet("font-size: 10px; padding: 2px 0;")
+        grp_schulung_layout.addWidget(self._schulung_import_status)
+
+        layout.addWidget(grp_schulung)
+
         # ── Speichern-Button ───────────────────────────────────────────
         save_btn = QPushButton("💾 Einstellungen speichern")
         save_btn.setMinimumHeight(42)
@@ -497,6 +553,7 @@ class EinstellungenWidget(QWidget):
             self._sa_ordner_edit.setText(get_setting('sonderaufgaben_ordner'))
             self._aocc_edit.setText(get_setting('aocc_datei'))
             self._c19_edit.setText(get_setting('code19_datei'))
+            self._schulung_excel_edit.setText(get_setting('schulungen_excel_pfad'))
         except Exception:
             pass
         # E-Mobby Liste laden
@@ -831,6 +888,45 @@ class EinstellungenWidget(QWidget):
         dlg_layout.addWidget(bb)
         dlg.exec()
 
+    def _browse_schulungen_excel(self):
+        current = self._schulung_excel_edit.text().strip()
+        start_dir = os.path.dirname(current) if os.path.isfile(current) else os.path.expanduser("~")
+        pfad, _ = QFileDialog.getOpenFileName(
+            self, "Schulungen Stammdaten-Excel auswählen", start_dir,
+            "Excel-Dateien (*.xlsx *.xls)"
+        )
+        if pfad:
+            self._schulung_excel_edit.setText(pfad)
+
+    def _schulungen_excel_importieren(self):
+        pfad = self._schulung_excel_edit.text().strip()
+        if not pfad:
+            QMessageBox.warning(self, "Kein Pfad", "Bitte zuerst den Excel-Pfad eingeben.")
+            return
+        if not os.path.isfile(pfad):
+            QMessageBox.warning(self, "Datei nicht gefunden", f"Datei nicht gefunden:\n{pfad}")
+            return
+        # Pfad speichern
+        try:
+            from functions.settings_functions import set_setting
+            set_setting('schulungen_excel_pfad', pfad)
+        except Exception:
+            pass
+        try:
+            from functions.schulungen_db import excel_importieren
+            imp, skip = excel_importieren(pfad)
+            self._schulung_import_status.setText(
+                f"✅ Importiert: {imp}  |  Übersprungen: {skip}"
+            )
+            self._schulung_import_status.setStyleSheet(
+                "color: #107e3e; font-size: 10px; padding: 2px 0;"
+            )
+        except Exception as exc:
+            self._schulung_import_status.setText(f"❌ Fehler: {exc}")
+            self._schulung_import_status.setStyleSheet(
+                "color: #c0392b; font-size: 10px; padding: 2px 0;"
+            )
+
     def _wiederherstellen_aus_archiv(self):
         """Wiederherstellen ausgewählter Archiv-Protokolle in die Haupt-DB."""
         selected = [i for i in self._archiv_list.selectedItems()
@@ -887,6 +983,7 @@ class EinstellungenWidget(QWidget):
             set_setting('sonderaufgaben_ordner', sa_ordner)
             set_setting('aocc_datei', self._aocc_edit.text().strip())
             set_setting('code19_datei', self._c19_edit.text().strip())
+            set_setting('schulungen_excel_pfad', self._schulung_excel_edit.text().strip())
             QMessageBox.information(
                 self, "Gespeichert",
                 "✅ Einstellungen wurden gespeichert.\n\n"
