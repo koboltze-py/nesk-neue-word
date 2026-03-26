@@ -410,6 +410,48 @@ def lade_kalender_daten(jahr: int, monat: int) -> dict:
     return aus
 
 
+def lade_mitarbeiter_mit_schulungen() -> list[dict]:
+    """
+    Alle Mitarbeiter mit ihren aktuellsten Schulungseinträgen pro Typ.
+    Rückgabe: Liste von dicts:
+      {id, nachname, vorname, qualifikation,
+       schulungen: {typ: {datum_absolviert, gueltig_bis, status, _dringlichkeit}}}
+    Mitarbeiter ohne jeglichen Eintrag haben schulungen = {}.
+    """
+    _init_db()
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        mitarbeiter = conn.execute(
+            "SELECT id, nachname, vorname, qualifikation FROM mitarbeiter ORDER BY nachname, vorname"
+        ).fetchall()
+        # Neuester Eintrag pro MA+Typ (MAX id als Tiebreaker)
+        eintraege = conn.execute(
+            """SELECT se.*
+               FROM schulungseintraege se
+               WHERE se.id IN (
+                   SELECT MAX(id) FROM schulungseintraege
+                   GROUP BY mitarbeiter_id, schulungstyp
+               )"""
+        ).fetchall()
+
+    eintraege_by_ma: dict[int, dict] = {}
+    for e in eintraege:
+        d = dict(e)
+        ma_id = d["mitarbeiter_id"]
+        typ   = d["schulungstyp"]
+        cfg   = SCHULUNGSTYPEN_CFG.get(typ, {})
+        gb    = _parse_datum(d.get("gueltig_bis"))
+        d["_dringlichkeit"] = _dringlichkeit(gb, cfg.get("laeuft_nicht_ab", True)) if gb else ""
+        eintraege_by_ma.setdefault(ma_id, {})[typ] = d
+
+    result = []
+    for m in mitarbeiter:
+        md = dict(m)
+        md["schulungen"] = eintraege_by_ma.get(m["id"], {})
+        result.append(md)
+    return result
+
+
 # ─── Excel-Import ─────────────────────────────────────────────────────────────
 # Spalten-Mapping für Blatt "laufend"
 _EXCEL_SPALTEN = [

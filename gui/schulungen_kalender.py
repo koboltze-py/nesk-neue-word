@@ -626,6 +626,564 @@ class _AgendaWidget(QWidget):
                 self._tbl.setItem(row, col, item)
 
 
+# ─── Mitarbeiter-Detail-Dialog ────────────────────────────────────────────────
+# ─── Einzelne-Schulung bearbeiten ─────────────────────────────────────────────
+class _SchulungBearbeitenDialog(QDialog):
+    """Kleiner Dialog: Datum einer einzelnen Schulung neu setzen."""
+
+    def __init__(self, ma_id: int, schulungstyp: str, eintrag: dict | None, parent=None):
+        super().__init__(parent)
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        self._ma_id  = ma_id
+        self._typ    = schulungstyp
+        self._eintrag = eintrag
+        cfg = SCHULUNGSTYPEN_CFG.get(schulungstyp, {})
+        self._cfg    = cfg
+        self._ablauf = cfg.get("ablauf", "einmalig")
+        anzeige = cfg.get("anzeige", schulungstyp)
+        self.setWindowTitle(f"✏️  {anzeige} bearbeiten")
+        self.setMinimumWidth(400)
+        self._build_ui(anzeige, eintrag)
+
+    def _build_ui(self, anzeige: str, eintrag: dict | None):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+        v.setContentsMargins(18, 14, 18, 14)
+
+        titel = QLabel(f"✏️  {anzeige}")
+        titel.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        titel.setStyleSheet(f"color:{FIORI_BLUE};")
+        v.addWidget(titel)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        def _date_edit(val: str = ""):
+            w = QDateEdit()
+            w.setCalendarPopup(True)
+            w.setDisplayFormat("dd.MM.yyyy")
+            w.setSpecialValueText("— (nicht gesetzt)")
+            w.setMinimumDate(QDate(2000, 1, 1))
+            if val:
+                parts = str(val).strip().split(".")
+                if len(parts) == 3:
+                    try:
+                        w.setDate(QDate(int(parts[2]), int(parts[1]), int(parts[0])))
+                        return w
+                    except Exception:
+                        pass
+            w.setDate(QDate(2000, 1, 1))
+            return w
+
+        # Absolviert am – bei "direkt"-Typen weniger relevant, aber immer zeigen
+        self._datum_abs = _date_edit(eintrag.get("datum_absolviert", "") if eintrag else "")
+        form.addRow("Absolviert am *:", self._datum_abs)
+
+        # Gültig bis: bei ablauf="direkt" manuell, bei "intervall" auto + anzeigen, bei "einmalig" ausblenden
+        self._datum_gb = _date_edit(eintrag.get("gueltig_bis", "") if eintrag else "")
+        if self._ablauf == "intervall":
+            intervall = self._cfg.get("intervall", 1)
+            info = QLabel(f"ℹ️  Wird automatisch berechnet: Absolviert + {intervall} Jahr(e)")
+            info.setStyleSheet("color:#555;font-size:10px;font-style:italic;")
+            form.addRow("Gültig bis:", info)
+            self._datum_abs.dateChanged.connect(self._auto_gueltig_bis)
+        elif self._ablauf == "direkt":
+            form.addRow("Gültig bis:", self._datum_gb)
+        # einmalig: kein Gültig-bis-Feld
+
+        self._bemerkung = QLineEdit()
+        self._bemerkung.setPlaceholderText("Optional …")
+        if eintrag:
+            self._bemerkung.setText(eintrag.get("bemerkung", "") or "")
+        form.addRow("Bemerkung:", self._bemerkung)
+
+        v.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_speichern = _btn("💾  Speichern", "#2e7d32", "#1b5e20")
+        btn_speichern.clicked.connect(self._speichern)
+        btn_abbrechen = _btn("Abbrechen", "#546e7a", "#455a64")
+        btn_abbrechen.clicked.connect(self.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_speichern)
+        btn_row.addWidget(btn_abbrechen)
+        v.addLayout(btn_row)
+
+    def _auto_gueltig_bis(self, d: QDate):
+        if d == QDate(2000, 1, 1):
+            return
+        intervall = self._cfg.get("intervall", 1)
+        try:
+            gb = QDate(d.year() + intervall, d.month(), d.day())
+            self._datum_gb.setDate(gb)
+        except Exception:
+            pass
+
+    def _datum_str(self, qdate: QDate) -> str:
+        if qdate == QDate(2000, 1, 1):
+            return ""
+        return qdate.toString("dd.MM.yyyy")
+
+    def _speichern(self):
+        from functions.schulungen_db import (
+            aktualisiere_schulungseintrag, speichere_schulungseintrag,
+            SCHULUNGSTYPEN_CFG, _berechne_status, _parse_datum
+        )
+        abs_str = self._datum_str(self._datum_abs.date())
+        if not abs_str:
+            QMessageBox.warning(self, "Pflichtfeld", "Bitte Datum 'Absolviert am' eingeben.")
+            return
+
+        cfg = SCHULUNGSTYPEN_CFG.get(self._typ, {})
+        ablauf = cfg.get("ablauf", "einmalig")
+
+        if ablauf == "intervall":
+            intervall = cfg.get("intervall", 1)
+            d = self._datum_abs.date()
+            try:
+                gb_date = QDate(d.year() + intervall, d.month(), d.day())
+            except Exception:
+                gb_date = QDate(2000, 1, 1)
+            gb_str = gb_date.toString("dd.MM.yyyy")
+        elif ablauf == "direkt":
+            gb_str = self._datum_str(self._datum_gb.date())
+        else:
+            gb_str = ""
+
+        gb_obj = _parse_datum(gb_str)
+        status = _berechne_status(gb_obj, cfg.get("laeuft_nicht_ab", False))
+
+        daten = {
+            "mitarbeiter_id":  self._ma_id,
+            "schulungstyp":    self._typ,
+            "datum_absolviert": abs_str,
+            "gueltig_bis":     gb_str,
+            "laeuft_nicht_ab": int(cfg.get("laeuft_nicht_ab", False)),
+            "status":          status,
+            "bemerkung":       self._bemerkung.text().strip(),
+        }
+        if self._eintrag and self._eintrag.get("id"):
+            aktualisiere_schulungseintrag(self._eintrag["id"], daten)
+        else:
+            speichere_schulungseintrag(daten)
+        self.accept()
+
+
+# ─── Mitarbeiter-Detail-Dialog ────────────────────────────────────────────────
+class _MitarbeiterDetailDialog(QDialog):
+    """Zeigt alle Schulungstypen für einen einzelnen Mitarbeiter.
+    Doppelklick oder Klick auf ✏️ öffnet den Bearbeiten-Dialog.
+    """
+
+    geaendert = Signal()   # feuert wenn ein Eintrag gespeichert wurde
+
+    _FARB_MAP = {
+        "abgelaufen": "#ffcdd2",
+        "rot":        "#ffe0b2",
+        "orange":     "#fff9c4",
+        "gelb":       "#f9fbe7",
+        "ok":         "#e8f5e9",
+        "einmalig":   "#eceff1",
+    }
+
+    def __init__(self, ma: dict, parent=None):
+        super().__init__(parent)
+        self._ma = ma
+        name = f"{ma.get('nachname', '')} {ma.get('vorname', '')}".strip()
+        self.setWindowTitle(f"🎓 Schulungen: {name}")
+        self.resize(720, 520)
+        self._build_ui()
+
+    def _build_ui(self):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+        v.setContentsMargins(16, 14, 16, 14)
+
+        ma   = self._ma
+        name = f"{ma.get('nachname', '')}, {ma.get('vorname', '')}".strip(", ")
+        qual = ma.get("qualifikation", "") or ""
+        titel = QLabel(f"👤  {name}   {('('+qual+')') if qual else ''}")
+        titel.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        titel.setStyleSheet(f"color:{FIORI_BLUE};")
+        v.addWidget(titel)
+
+        schulungen = ma.get("schulungen", {})
+        if not schulungen:
+            warn = QLabel("⚠️  Dieser Mitarbeiter hat noch keine Schulungseinträge in der Datenbank.")
+            warn.setStyleSheet("color:#b71c1c;font-size:12px;padding:4px 0;")
+            v.addWidget(warn)
+
+        self._tbl = QTableWidget()
+        self._tbl.setColumnCount(5)
+        self._tbl.setHorizontalHeaderLabels(
+            ["Schulungstyp", "Absolviert am", "Gültig bis", "Status", ""]
+        )
+        self._tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._tbl.setAlternatingRowColors(True)
+        self._tbl.verticalHeader().setVisible(False)
+        self._tbl.setStyleSheet("font-size:12px;")
+        hh = self._tbl.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self._tbl.doubleClicked.connect(lambda idx: self._bearbeiten(idx.row()))
+        v.addWidget(self._tbl, 1)
+
+        self._tabelle_befuellen()
+
+        hint = QLabel("💡 Doppelklick oder ✏️-Button zum Bearbeiten eines Eintrags")
+        hint.setStyleSheet("color:#777;font-size:10px;font-style:italic;")
+        v.addWidget(hint)
+
+        # Legende
+        leg_lay = QHBoxLayout()
+        for key, label in [
+            ("abgelaufen", "Abgelaufen"), ("rot", "≤1 Mon."),
+            ("orange", "≤2 Mon."), ("gelb", "≤3 Mon."), ("ok", "OK"),
+        ]:
+            bg, fg = _chip_farbe(key)
+            lbl = QLabel(f"  {label}  ")
+            lbl.setStyleSheet(
+                f"background:{bg};color:{fg};border-radius:3px;"
+                f"font-size:10px;padding:1px 5px;"
+            )
+            leg_lay.addWidget(lbl)
+        no_lbl = QLabel("  Kein Eintrag  ")
+        no_lbl.setStyleSheet("color:#bdbdbd;font-size:10px;padding:1px 5px;")
+        leg_lay.addWidget(no_lbl)
+        leg_lay.addStretch()
+        v.addLayout(leg_lay)
+
+        btn = _btn("Schließen", "#546e7a", "#455a64")
+        btn.clicked.connect(self.accept)
+        v.addWidget(btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def _tabelle_befuellen(self):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG, lade_mitarbeiter_mit_schulungen
+        # Daten neu laden für aktuellen Stand
+        alle = lade_mitarbeiter_mit_schulungen()
+        ma_id = self._ma["id"]
+        for m in alle:
+            if m["id"] == ma_id:
+                self._ma = m
+                break
+        schulungen = self._ma.get("schulungen", {})
+
+        self._tbl.setRowCount(len(SCHULUNGSTYPEN_CFG))
+        self._tbl.blockSignals(True)
+        for row, (key, cfg) in enumerate(SCHULUNGSTYPEN_CFG.items()):
+            anzeige = cfg["anzeige"]
+            eintrag = schulungen.get(key)
+            if eintrag:
+                dring = eintrag.get("_dringlichkeit", "")
+                bg    = self._FARB_MAP.get(dring, "#ffffff")
+                dat   = eintrag.get("datum_absolviert", "") or "—"
+                gb    = eintrag.get("gueltig_bis", "") or "—"
+                st    = eintrag.get("status", "") or "—"
+                items = [
+                    QTableWidgetItem(anzeige),
+                    QTableWidgetItem(dat),
+                    QTableWidgetItem(gb),
+                    QTableWidgetItem(st),
+                ]
+                if bg != "#ffffff":
+                    for it in items:
+                        it.setBackground(QColor(bg))
+            else:
+                items = [QTableWidgetItem(anzeige)] + [QTableWidgetItem("") for _ in range(3)]
+                for it in items:
+                    it.setForeground(QColor("#bdbdbd"))
+                items[0].setForeground(QColor("#9e9e9e"))
+
+            # Typ + Eintrag für spätere Bearbeitung im Item speichern
+            items[0].setData(Qt.ItemDataRole.UserRole, (key, eintrag))
+            for col, it in enumerate(items):
+                self._tbl.setItem(row, col, it)
+
+            # ✏️-Bearbeiten-Button in letzter Spalte
+            btn_edit = QPushButton("✏️")
+            btn_edit.setFixedSize(28, 24)
+            btn_edit.setToolTip("Eintrag bearbeiten")
+            btn_edit.setStyleSheet(
+                "QPushButton{background:#e3f2fd;border:none;border-radius:3px;font-size:13px;}"
+                "QPushButton:hover{background:#90caf9;}"
+            )
+            btn_edit.clicked.connect(lambda _=False, r=row: self._bearbeiten(r))
+            self._tbl.setCellWidget(row, 4, btn_edit)
+        self._tbl.blockSignals(False)
+
+    def _bearbeiten(self, row: int):
+        item = self._tbl.item(row, 0)
+        if not item:
+            return
+        key, eintrag = item.data(Qt.ItemDataRole.UserRole)
+        dlg = _SchulungBearbeitenDialog(self._ma["id"], key, eintrag, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._tabelle_befuellen()   # Tabelle sofort refreshen
+            self.geaendert.emit()       # Signal nach oben weiterleiten
+
+
+# ─── Mitarbeiter-Liste (durchsuchbar) ─────────────────────────────────────────
+class _MitarbeiterListeWidget(QWidget):
+    """Durchsuchbare, filterbare Liste aller Mitarbeiter mit Schulungsstatus.
+    Doppelklick auf eine Zeile öffnet den Detaildialog mit allen 14 Schulungstypen.
+    """
+
+    # Schlüsseltypen für die Matrix-Spalten
+    _MATRIX = [
+        ("EH",                 "EH"),
+        ("Refresher",          "Ref."),
+        ("ZÜP",                "ZÜP"),
+        ("Aerztl_Untersuchung","Ärztl."),
+        ("Fuehrerschein_Kont", "FS-K."),
+    ]
+
+    _FARB_MAP = {
+        "abgelaufen": "#ffcdd2",
+        "rot":        "#ffe0b2",
+        "orange":     "#fff9c4",
+        "gelb":       "#f9fbe7",
+        "ok":         "#e8f5e9",
+        "einmalig":   "#eceff1",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._alle_daten: list[dict] = []
+        self._build_ui()
+
+    def _build_ui(self):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 4, 0, 0)
+        v.setSpacing(6)
+
+        # ── Filterleiste ──────────────────────────────────────────────────
+        fframe = QFrame()
+        fframe.setStyleSheet(
+            "QFrame{background:#e3f2fd;border:1px solid #90caf9;"
+            "border-radius:4px;}"
+        )
+        fl = QHBoxLayout(fframe)
+        fl.setContentsMargins(8, 5, 8, 5)
+        fl.setSpacing(8)
+
+        fl.addWidget(QLabel("🔍"))
+        self._suche = QLineEdit()
+        self._suche.setPlaceholderText("Name suchen …")
+        self._suche.setMinimumWidth(170)
+        self._suche.setClearButtonEnabled(True)
+        self._suche.textChanged.connect(self._filter_anwenden)
+        fl.addWidget(self._suche)
+
+        fl.addWidget(QLabel("Status:"))
+        self._filter_status = QComboBox()
+        self._filter_status.addItems([
+            "Alle", "Abgelaufen", "≤ 1 Monat", "≤ 2 Monate",
+            "≤ 3 Monate", "OK", "Kein Eintrag",
+        ])
+        self._filter_status.currentIndexChanged.connect(self._filter_anwenden)
+        fl.addWidget(self._filter_status)
+
+        fl.addWidget(QLabel("Schulung:"))
+        self._filter_typ = QComboBox()
+        self._filter_typ.addItem("Alle Schulungen", None)
+        for key, cfg in SCHULUNGSTYPEN_CFG.items():
+            self._filter_typ.addItem(cfg["anzeige"], key)
+        self._filter_typ.currentIndexChanged.connect(self._filter_anwenden)
+        fl.addWidget(self._filter_typ)
+
+        btn_reset = _btn_flat("✕ Zurücksetzen")
+        btn_reset.clicked.connect(self._filter_zuruecksetzen)
+        fl.addWidget(btn_reset)
+        fl.addStretch()
+
+        self._anzahl_lbl = QLabel()
+        self._anzahl_lbl.setStyleSheet("color:#555;font-size:11px;")
+        fl.addWidget(self._anzahl_lbl)
+        v.addWidget(fframe)
+
+        # ── Tabelle ───────────────────────────────────────────────────────
+        self._tbl = QTableWidget()
+        self._tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._tbl.setAlternatingRowColors(True)
+        self._tbl.verticalHeader().setVisible(False)
+        self._tbl.setStyleSheet("font-size:12px;")
+        self._tbl.doubleClicked.connect(lambda idx: self._zeige_detail(idx.row()))
+        v.addWidget(self._tbl, 1)
+
+        hint = QLabel("💡 Doppelklick auf einen Mitarbeiter → alle 14 Schulungstypen anzeigen")
+        hint.setStyleSheet("color:#777;font-size:10px;font-style:italic;padding:2px 0;")
+        v.addWidget(hint)
+
+    # ── Daten laden ───────────────────────────────────────────────────────
+    def aktualisieren(self):
+        from functions.schulungen_db import lade_mitarbeiter_mit_schulungen
+        try:
+            self._alle_daten = lade_mitarbeiter_mit_schulungen()
+        except Exception:
+            self._alle_daten = []
+        self._filter_anwenden()
+
+    # ── Filter ────────────────────────────────────────────────────────────
+    _STATUS_DRING = {
+        1: "abgelaufen",
+        2: "rot",
+        3: "orange",
+        4: "gelb",
+        5: "ok",
+        6: "__kein_eintrag__",
+    }
+    _DRING_REIHE = ["abgelaufen", "rot", "orange", "gelb", "ok", "einmalig", ""]
+
+    def _schlechtester(self, schulungen: dict) -> str:
+        worst = len(self._DRING_REIHE) - 1
+        for e in schulungen.values():
+            d = e.get("_dringlichkeit", "")
+            if d in self._DRING_REIHE:
+                idx = self._DRING_REIHE.index(d)
+                if idx < worst:
+                    worst = idx
+        return self._DRING_REIHE[worst]
+
+    def _filter_anwenden(self):
+        stext      = self._suche.text().strip().lower()
+        status_idx = self._filter_status.currentIndex()
+        typ_key    = self._filter_typ.currentData()
+        filter_dr  = self._STATUS_DRING.get(status_idx)
+
+        gefiltert = []
+        for ma in self._alle_daten:
+            name = f"{ma.get('nachname','')} {ma.get('vorname','')}".lower()
+            if stext and stext not in name:
+                continue
+
+            schulungen = ma.get("schulungen", {})
+
+            if typ_key:
+                eintrag = schulungen.get(typ_key)
+                if filter_dr == "__kein_eintrag__":
+                    if eintrag:
+                        continue
+                elif filter_dr:
+                    if not eintrag or eintrag.get("_dringlichkeit") != filter_dr:
+                        continue
+            else:
+                if filter_dr == "__kein_eintrag__":
+                    if schulungen:
+                        continue
+                elif filter_dr:
+                    if self._schlechtester(schulungen) != filter_dr:
+                        continue
+
+            gefiltert.append(ma)
+
+        # ── Mitarbeiter OHNE Einträge gesondert ans Ende ──────────────────
+        mit_eintraegen   = [m for m in gefiltert if m.get("schulungen")]
+        ohne_eintraegen  = [m for m in gefiltert if not m.get("schulungen")]
+        geordnet = mit_eintraegen + ohne_eintraegen
+
+        self._tabelle_befuellen(geordnet, len(ohne_eintraegen))
+        self._anzahl_lbl.setText(
+            f"{len(gefiltert)} Mitarbeiter"
+            + (f"  ({len(ohne_eintraegen)} ohne Einträge)" if ohne_eintraegen else "")
+        )
+
+    def _tabelle_befuellen(self, daten: list[dict], anzahl_ohne: int):
+        typ_key = self._filter_typ.currentData()
+
+        if typ_key:
+            from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+            anzeige = SCHULUNGSTYPEN_CFG.get(typ_key, {}).get("anzeige", typ_key)
+            cols = ["Name", "Qualifikation", anzeige, "Gültig bis", "Status"]
+        else:
+            cols = ["Name", "Qualifikation"] + [k for _, k in self._MATRIX]
+
+        self._tbl.setColumnCount(len(cols))
+        self._tbl.setHorizontalHeaderLabels(cols)
+        self._tbl.setRowCount(len(daten))
+
+        hh = self._tbl.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in range(1, len(cols)):
+            hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+
+        grenze = len(daten) - anzahl_ohne  # erste Zeile der "ohne Einträge"-Gruppe
+
+        for row, ma in enumerate(daten):
+            schulungen = ma.get("schulungen", {})
+            name  = f"{ma.get('nachname', '')}, {ma.get('vorname', '')}".strip(", ")
+            qual  = ma.get("qualifikation", "") or ""
+            kein  = not schulungen  # Mitarbeiter ohne jegliche Einträge
+
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, ma)
+            qual_item = QTableWidgetItem(qual)
+
+            if kein:
+                # Gesamte Zeile grau einfärben
+                for it in [name_item, qual_item]:
+                    it.setForeground(QColor("#9e9e9e"))
+
+            self._tbl.setItem(row, 0, name_item)
+            self._tbl.setItem(row, 1, qual_item)
+
+            if typ_key:
+                eintrag = schulungen.get(typ_key)
+                if eintrag:
+                    dring = eintrag.get("_dringlichkeit", "")
+                    bg    = self._FARB_MAP.get(dring, "#ffffff")
+                    for col, text in enumerate([
+                        SCHULUNGSTYPEN_CFG_K.get(typ_key, {}).get("anzeige", typ_key),
+                        eintrag.get("gueltig_bis", "—") or "—",
+                        eintrag.get("status", "—") or "—",
+                    ], start=2):
+                        it = QTableWidgetItem(text)
+                        it.setBackground(QColor(bg))
+                        self._tbl.setItem(row, col, it)
+                else:
+                    for col, text in enumerate(["—", "—", "—"], start=2):
+                        it = QTableWidgetItem(text)
+                        it.setForeground(QColor("#bdbdbd"))
+                        self._tbl.setItem(row, col, it)
+            else:
+                for col, (typ, _) in enumerate(self._MATRIX, start=2):
+                    eintrag = schulungen.get(typ)
+                    if eintrag:
+                        dring = eintrag.get("_dringlichkeit", "")
+                        bg    = self._FARB_MAP.get(dring, "#ffffff")
+                        it    = QTableWidgetItem(eintrag.get("gueltig_bis", "—") or "—")
+                        it.setBackground(QColor(bg))
+                    else:
+                        it = QTableWidgetItem("—")
+                        it.setForeground(QColor("#bdbdbd"))
+                    self._tbl.setItem(row, col, it)
+
+    def _zeige_detail(self, row: int):
+        item = self._tbl.item(row, 0)
+        if not item:
+            return
+        ma = item.data(Qt.ItemDataRole.UserRole)
+        if not ma:
+            return
+        dlg = _MitarbeiterDetailDialog(ma, self)
+        dlg.geaendert.connect(self.aktualisieren)   # nach Speichern Liste neu laden
+        dlg.exec()
+
+    def _filter_zuruecksetzen(self):
+        self._suche.clear()
+        self._filter_status.setCurrentIndex(0)
+        self._filter_typ.setCurrentIndex(0)
+
+
 # ─── Haupt-Widget ─────────────────────────────────────────────────────────────
 class SchulungenKalenderWidget(QWidget):
     """
@@ -662,26 +1220,26 @@ class SchulungenKalenderWidget(QWidget):
         cl.setContentsMargins(10, 6, 10, 6)
         cl.setSpacing(10)
 
-        btn_prev = _btn("◀", "#546e7a", "#455a64", 32)
-        btn_prev.setFixedWidth(36)
-        btn_prev.clicked.connect(self._vorheriger_monat)
+        self._btn_prev = _btn("◀", "#546e7a", "#455a64", 32)
+        self._btn_prev.setFixedWidth(36)
+        self._btn_prev.clicked.connect(self._vorheriger_monat)
 
         self._monat_lbl = QLabel()
         self._monat_lbl.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self._monat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._monat_lbl.setMinimumWidth(180)
 
-        btn_next = _btn("▶", "#546e7a", "#455a64", 32)
-        btn_next.setFixedWidth(36)
-        btn_next.clicked.connect(self._naechster_monat)
+        self._btn_next = _btn("▶", "#546e7a", "#455a64", 32)
+        self._btn_next.setFixedWidth(36)
+        self._btn_next.clicked.connect(self._naechster_monat)
 
-        btn_heute = _btn_flat("Heute")
-        btn_heute.clicked.connect(self._gehe_zu_heute)
+        self._btn_heute = _btn_flat("Heute")
+        self._btn_heute.clicked.connect(self._gehe_zu_heute)
 
-        cl.addWidget(btn_prev)
+        cl.addWidget(self._btn_prev)
         cl.addWidget(self._monat_lbl)
-        cl.addWidget(btn_next)
-        cl.addWidget(btn_heute)
+        cl.addWidget(self._btn_next)
+        cl.addWidget(self._btn_heute)
         cl.addStretch()
 
         self._btn_import = _btn("📥  Excel importieren", "#1565c0", "#0d47a1", 32)
@@ -692,7 +1250,17 @@ class SchulungenKalenderWidget(QWidget):
         cl.addWidget(self._btn_neuer_ma)
         v.addWidget(ctrl)
 
-        # ── Legende ────────────────────────────────────────────────────────
+        # ── Haupt-Tabs: Kalender | Mitarbeiter-Liste ───────────────────────
+        self._haupt_tabs = QTabWidget()
+        self._haupt_tabs.currentChanged.connect(self._on_tab_wechsel)
+
+        # Tab 0: Kalender mit Legende + Splitter
+        kalender_widget = QWidget()
+        kv = QVBoxLayout(kalender_widget)
+        kv.setContentsMargins(0, 4, 0, 0)
+        kv.setSpacing(6)
+
+        # Legende
         leg = QHBoxLayout()
         leg.setSpacing(8)
         for key, label in [
@@ -710,22 +1278,35 @@ class SchulungenKalenderWidget(QWidget):
             )
             leg.addWidget(lbl)
         leg.addStretch()
-        v.addLayout(leg)
+        kv.addLayout(leg)
 
-        # ── Splitter: Kalender oben, Agenda unten ──────────────────────────
         splitter = QSplitter(Qt.Orientation.Vertical)
-
-        # Kalender
         self._kalender = _MonatsKalender()
         self._kalender.tagesklick.connect(self._tag_geklickt)
         splitter.addWidget(self._kalender)
-
-        # Agenda
         self._agenda = _AgendaWidget()
         splitter.addWidget(self._agenda)
-
         splitter.setSizes([480, 260])
-        v.addWidget(splitter, 1)
+        kv.addWidget(splitter, 1)
+
+        self._haupt_tabs.addTab(kalender_widget, "📅  Kalender / Agenda")
+
+        # Tab 1: Mitarbeiter-Liste
+        self._ma_liste = _MitarbeiterListeWidget()
+        self._haupt_tabs.addTab(self._ma_liste, "👥  Mitarbeiter-Liste")
+
+        v.addWidget(self._haupt_tabs, 1)
+
+    def _on_tab_wechsel(self, idx: int):
+        """Navigations-Buttons nur im Kalender-Tab einblenden."""
+        kalender = (idx == 0)
+        self._btn_prev.setVisible(kalender)
+        self._monat_lbl.setVisible(kalender)
+        self._btn_next.setVisible(kalender)
+        self._btn_heute.setVisible(kalender)
+        if not kalender:
+            self._ma_liste.aktualisieren()
+
 
     def _aktualisieren(self):
         from functions.schulungen_db import lade_kalender_daten
@@ -740,6 +1321,9 @@ class SchulungenKalenderWidget(QWidget):
             daten = {}
         self._kalender.setze_monat(self._jahr, self._monat, daten)
         self._agenda.aktualisieren()
+        # MA-Liste neu laden wenn aktiver Tab
+        if self._haupt_tabs.currentIndex() == 1:
+            self._ma_liste.aktualisieren()
 
     def _vorheriger_monat(self):
         if self._monat == 1:
