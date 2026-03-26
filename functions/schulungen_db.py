@@ -27,7 +27,7 @@ _EXCEL_PFAD = (
 # laeuft_nicht_ab: kein Farbwarner im Kalender (z. B. ärztl. Untersuchung)
 SCHULUNGSTYPEN_CFG = {
     "ZÜP":                    {"anzeige": "ZÜP",                   "ablauf": "direkt",    "intervall": None, "laeuft_nicht_ab": False},
-    "EH":                     {"anzeige": "EH",                    "ablauf": "intervall", "intervall": 2,    "laeuft_nicht_ab": False},
+    "EH":                     {"anzeige": "EH",                    "ablauf": "intervall", "intervall": 1,    "laeuft_nicht_ab": False},
     "Refresher":              {"anzeige": "Refresher",             "ablauf": "intervall", "intervall": 1,    "laeuft_nicht_ab": False},
     "Aerztl_Untersuchung":    {"anzeige": "Ärztl. Untersuchung",  "ablauf": "direkt",    "intervall": None, "laeuft_nicht_ab": True},
     "Fuehrerschein_Kont":     {"anzeige": "Führerschein Kontrolle","ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
@@ -117,6 +117,7 @@ def _init_db():
                     FROM schulungen
                 """)
         conn.commit()
+
 
 
 # ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
@@ -611,6 +612,33 @@ def lade_jahre() -> list[int]:
 
 # ─── Einmaliger Erstimport ────────────────────────────────────────────────────
 
+def _korrigiere_eh_intervall():
+    """
+    Einmalige DB-Korrektur: EH-Einträge, deren güeltig_bis auf
+    datum_absolviert + 2 Jahre berechnet wurde, auf + 1 Jahr setzen.
+    Wird beim _init_db aufgerufen (idempotent durch Flag in settings).
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT id, datum_absolviert FROM schulungseintraege WHERE schulungstyp='EH' AND datum_absolviert IS NOT NULL AND datum_absolviert != ''"
+            ).fetchall()
+            now = datetime.now().isoformat(timespec="seconds")
+            for row_id, dat_str in rows:
+                d = _parse_datum(dat_str)
+                if d is None:
+                    continue
+                korrekt = _datum_str(date(d.year + 1, d.month, d.day))
+                status = _berechne_status(date(d.year + 1, d.month, d.day), False)
+                conn.execute(
+                    "UPDATE schulungseintraege SET gueltig_bis=?, status=?, zuletzt_akt=? WHERE id=?",
+                    (korrekt, status, now, row_id)
+                )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def erstimport_wenn_leer() -> "tuple[int, int] | None":
     """
     Importiert die Stammdaten-Excel automatisch, wenn die Mitarbeiter-Tabelle
@@ -619,6 +647,8 @@ def erstimport_wenn_leer() -> "tuple[int, int] | None":
     Gibt (importiert, uebersprungen) zurück oder None wenn bereits Daten vorhanden.
     """
     _init_db()
+    # EH-Intervall-Korrektur immer ausführen (idempotent)
+    _korrigiere_eh_intervall()
     with _connect() as conn:
         anzahl = conn.execute("SELECT COUNT(*) FROM mitarbeiter").fetchone()[0]
     if anzahl > 0:
