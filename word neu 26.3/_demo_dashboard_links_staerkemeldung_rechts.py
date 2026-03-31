@@ -145,7 +145,7 @@ def _zeitgruppen_para(cell, gruppen: dict, size=9.5):
         ind.set(qn("w:left"), "2550"); ind.set(qn("w:hanging"), "2550")
         pPr.append(ind)
         p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(4)  # Zeilenabstand zwischen Zeitgruppen
+        p.paragraph_format.space_after  = Pt(2)  # Zeilenabstand zwischen Zeitgruppen
         rz = p.add_run(f"{zeit}\t"); rz.font.size = Pt(size)
         rn = p.add_run(" / ".join(namen)); rn.font.size = Pt(size)
 
@@ -289,13 +289,13 @@ def erstelle_demo():
         rb2.font.size = Pt(7.5)
         rb2.font.color.rgb = _rgb(FC_HEX if aktiv else "CC3333")
 
-    # Gesamt-Box
+    # Gesamt-Box – kein farbiger Hintergrund
     gbox = lc.add_table(rows=1, cols=1); gbox.style = "Table Grid"
-    gc   = gbox.cell(0, 0); _no_border(gc); _set_bg(gc, FC_BG); gc.width = L_W
+    gc   = gbox.cell(0, 0); _no_border(gc); gc.width = L_W
     pg   = gc.paragraphs[0]; pg.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pg.paragraph_format.space_before = Pt(3); pg.paragraph_format.space_after = Pt(3)
-    rg   = pg.add_run(f"Gesamt: {BUL_ANZ}/5  🔶  {LBL_BUL}")
-    rg.bold = True; rg.font.size = Pt(8); rg.font.color.rgb = _rgb(FC_HEX)
+    rg   = pg.add_run(f"Gesamt: {BUL_ANZ}/5  ◇  {LBL_BUL}")
+    rg.bold = True; rg.font.size = Pt(8); rg.font.color.rgb = _rgb("1A3460")
 
     # ══════════════════════════════════════════════════════════════════════════
     # RECHTE SPALTE – klassische Stärkemeldung (StaerkemeldungExport-Stil)
@@ -303,23 +303,23 @@ def erstelle_demo():
 
     # Sub-Header (kein farbiger Block)
     p_hdr = rc.add_paragraph()
-    p_hdr.paragraph_format.space_before = Pt(4)
-    p_hdr.paragraph_format.space_after  = Pt(4)
+    p_hdr.paragraph_format.space_before = Pt(2)
+    p_hdr.paragraph_format.space_after  = Pt(2)
     rh = p_hdr.add_run(f"STÄRKEMELDUNG  ·  {DATUM}")
-    rh.bold = True; rh.font.size = Pt(12); rh.font.color.rgb = _rgb("1A3460")
+    rh.bold = True; rh.font.size = Pt(11); rh.font.color.rgb = _rgb("1A3460")
 
     # Zeitraum-Zeile
     p_zr = rc.add_paragraph()
-    p_zr.paragraph_format.space_before = Pt(2)
-    p_zr.paragraph_format.space_after  = Pt(4)
+    p_zr.paragraph_format.space_before = Pt(1)
+    p_zr.paragraph_format.space_after  = Pt(2)
     rz   = p_zr.add_run(f"Zeitraum:\t{DATUM} bis {DATUM}")
-    rz.font.size = Pt(11); rz.font.bold = True
+    rz.font.size = Pt(10); rz.font.bold = True
 
     # ── Schichtleiter ─────────────────────────────────────────────────────────
     ph_sl = rc.add_paragraph()
-    ph_sl.paragraph_format.space_before = Pt(2)
+    ph_sl.paragraph_format.space_before = Pt(1)
     ph_sl.paragraph_format.space_after  = Pt(1)
-    rh_sl = ph_sl.add_run("Schichtleiter"); rh_sl.font.bold = True; rh_sl.font.size = Pt(11)
+    rh_sl = ph_sl.add_run("Schichtleiter"); rh_sl.font.bold = True; rh_sl.font.size = Pt(10)
 
     for prefix, (name, zeit) in [("Tag:  ", SCHICHTL_TAG), ("Nacht:", SCHICHTL_NACHT)]:
         p_sl = rc.add_paragraph()
@@ -330,36 +330,36 @@ def erstelle_demo():
         ind = OxmlElement("w:ind"); ind.set(qn("w:left"), "2550"); ind.set(qn("w:hanging"), "2550")
         pPr.append(ind)
         p_sl.paragraph_format.space_before = Pt(0); p_sl.paragraph_format.space_after = Pt(0)
-        r_pf = p_sl.add_run(f"{prefix}\t"); r_pf.font.size = Pt(10.5)
-        r_nm = p_sl.add_run(f"{name}  ({zeit})"); r_nm.font.size = Pt(10.5); r_nm.bold = True
+        r_pf = p_sl.add_run(f"{prefix}\t"); r_pf.font.size = Pt(10)
+        r_nm = p_sl.add_run(f"{name}  ({zeit})"); r_nm.font.size = Pt(10); r_nm.bold = True
 
-    rc.add_paragraph().paragraph_format.space_after = Pt(2)
+    rc.add_paragraph().paragraph_format.space_after = Pt(1)
 
     # ── Disposition ───────────────────────────────────────────────────────────
     ph = rc.add_paragraph()
-    ph.paragraph_format.space_before = Pt(2)
-    ph.paragraph_format.space_after  = Pt(1)
-    rh = ph.add_run("Disposition"); rh.font.bold = True; rh.font.size = Pt(11)
+    ph.paragraph_format.space_before = Pt(1)
+    ph.paragraph_format.space_after  = Pt(0)
+    rh = ph.add_run("Disposition"); rh.font.bold = True; rh.font.size = Pt(10)
 
     all_dispo = DISPO_TAG + DISPO_NACHT
-    _zeitgruppen_para(rc, _grup(all_dispo))
-    rc.add_paragraph().paragraph_format.space_after = Pt(2)
+    _zeitgruppen_para(rc, _grup(all_dispo), size=9)
+    rc.add_paragraph().paragraph_format.space_after = Pt(1)
 
     # ── Behindertenbetreuer ───────────────────────────────────────────────────
     ph2 = rc.add_paragraph()
-    ph2.paragraph_format.space_before = Pt(2)
-    ph2.paragraph_format.space_after  = Pt(1)
-    rh2 = ph2.add_run("Behindertenbetreuer"); rh2.font.bold = True; rh2.font.size = Pt(11)
+    ph2.paragraph_format.space_before = Pt(1)
+    ph2.paragraph_format.space_after  = Pt(0)
+    rh2 = ph2.add_run("Behindertenbetreuer"); rh2.font.bold = True; rh2.font.size = Pt(10)
 
     all_bet = BETREUER_TAG + BETREUER_NACHT
-    _zeitgruppen_para(rc, _grup(all_bet))
-    rc.add_paragraph().paragraph_format.space_after = Pt(2)
+    _zeitgruppen_para(rc, _grup(all_bet), size=9)
+    rc.add_paragraph().paragraph_format.space_after = Pt(1)
 
     # ── PAX-Zahl (jetzt hier, kein separater Block mehr am Ende) ──────
     ph_pax = rc.add_paragraph()
-    ph_pax.paragraph_format.space_before = Pt(2)
-    ph_pax.paragraph_format.space_after  = Pt(1)
-    rh_pax = ph_pax.add_run("PAX gestern"); rh_pax.font.bold = True; rh_pax.font.size = Pt(11)
+    ph_pax.paragraph_format.space_before = Pt(1)
+    ph_pax.paragraph_format.space_after  = Pt(0)
+    rh_pax = ph_pax.add_run("PAX gestern"); rh_pax.font.bold = True; rh_pax.font.size = Pt(10)
     p_paxz = rc.add_paragraph()
     pPr_p  = p_paxz._p.get_or_add_pPr()
     tabs_p = OxmlElement("w:tabs"); tab_p = OxmlElement("w:tab")
@@ -368,12 +368,12 @@ def erstelle_demo():
     ind_p  = OxmlElement("w:ind"); ind_p.set(qn("w:left"), "2550"); ind_p.set(qn("w:hanging"), "2550")
     pPr_p.append(ind_p)
     p_paxz.paragraph_format.space_before = Pt(0); p_paxz.paragraph_format.space_after = Pt(0)
-    rp1 = p_paxz.add_run(f"{DATUM}\t"); rp1.font.size = Pt(10.5)
+    rp1 = p_paxz.add_run(f"{DATUM}\t"); rp1.font.size = Pt(10)
     rp2 = p_paxz.add_run(f"{PAX_EINZEL:,}".replace(",", ".") + " Passagiere")
-    rp2.font.size = Pt(10.5); rp2.bold = True
+    rp2.font.size = Pt(10); rp2.bold = True
 
     # ── Speichern ─────────────────────────────────────────────────────────────
-    out = ZIEL / f"DEMO_Dashboard_kein_hintergrund_{DATUM.replace('.','')}.docx"
+    out = ZIEL / f"DEMO_Dashboard_v3_{DATUM.replace('.','')}.docx"
     doc.save(str(out))
     print(f"[OK] Gespeichert: {out}")
     return str(out)
