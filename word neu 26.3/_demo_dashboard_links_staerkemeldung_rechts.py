@@ -228,10 +228,6 @@ def erstelle_demo():
 
     _trenn(lc, "1565a8")
 
-    # Datum
-    _para(lc, f"Datum:  {DATUM}", bold=True, size=12, fg="000000",
-          align="center", sb=2, sa=2)
-
     _trenn(lc, "1565a8")
 
     # Kennzahlen  ✦ Label \n WERT
@@ -311,7 +307,7 @@ def erstelle_demo():
     p_hdr = rc.add_paragraph()
     p_hdr.paragraph_format.space_before = Pt(1)
     p_hdr.paragraph_format.space_after  = Pt(1)
-    rh = p_hdr.add_run(f"STÄRKEMELDUNG  ·  {DATUM}")
+    rh = p_hdr.add_run("STÄRKEMELDUNG")
     rh.bold = True; rh.font.size = Pt(13); rh.font.color.rgb = _rgb("000000")
     rh.font.name = "Aptos"
     # Leerabsatz nach Header (sa=1, sb=1) – wie in v8
@@ -323,7 +319,7 @@ def erstelle_demo():
     p_zr.paragraph_format.space_before = Pt(0)
     p_zr.paragraph_format.space_after  = Pt(1)
     rz   = p_zr.add_run(f"Zeitraum:\t{DATUM} bis {DATUM}")
-    rz.font.size = Pt(12); rz.font.bold = True; rz.font.name = "Aptos"
+    rz.font.size = Pt(12); rz.font.bold = False; rz.font.name = "Aptos"
     # Leerabsatz nach Zeitraum (sa=1, sb=0) – wie in v8
     p_sep1 = rc.add_paragraph()
     p_sep1.paragraph_format.space_before = Pt(0); p_sep1.paragraph_format.space_after = Pt(1)
@@ -402,7 +398,7 @@ def erstelle_demo():
     rp2.font.size = Pt(12); rp2.bold = False; rp2.font.name = "Aptos"
 
     # ── Speichern ─────────────────────────────────────────────────────────────
-    out = ZIEL / f"DEMO_Dashboard_v10_{DATUM.replace('.','')}.docx"
+    out = ZIEL / f"DEMO_Dashboard_v10b_{DATUM.replace('.','')}.docx"
     doc.save(str(out))
     print(f"[OK] Gespeichert: {out}")
     return str(out)
