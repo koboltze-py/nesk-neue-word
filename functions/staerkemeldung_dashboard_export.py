@@ -52,7 +52,7 @@ def _no_border(cell):
         e=OxmlElement(f"w:{side}"); e.set(qn("w:val"),"none"); b.append(e)
     pr.append(b)
 
-def _para(cell, text, bold=False, size=12, fg="000000", align="left", sa=0, sb=0):
+def _para(cell, text, bold=False, size=9, fg="000000", align="left", sa=0, sb=0):
     p=cell.add_paragraph()
     p.alignment=(WD_ALIGN_PARAGRAPH.CENTER if align=="center" else
                  WD_ALIGN_PARAGRAPH.RIGHT  if align=="right"  else
@@ -87,7 +87,7 @@ def _zeitgruppen(personen, ist_dispo=False):
         g.setdefault(key,[]).append(name)
     return g
 
-def _zeitgruppen_para(cell, gruppen, size=12.5):
+def _zeitgruppen_para(cell, gruppen, size=9.5):
     for zeit,namen in sorted(gruppen.items()):
         p=cell.add_paragraph(); pPr=p._p.get_or_add_pPr()
         tabs=OxmlElement("w:tabs"); tab=OxmlElement("w:tab")
@@ -199,9 +199,9 @@ class StaerkemeldungDashboardExport:
             lp.add_run().add_picture(str(_LOGO),width=Inches(1.0))
         tp=ht.rows[0].cells[1].paragraphs[0]; tp.alignment=WD_ALIGN_PARAGRAPH.RIGHT
         r1=tp.add_run("Deutsches Rotes Kreuz Kreisverband Koeln e.V.\n")
-        r1.font.size=Pt(12); r1.font.bold=True; r1.font.name="Aptos"
+        r1.font.size=Pt(9); r1.font.bold=True; r1.font.name="Aptos"
         r2=tp.add_run("Unfallhilfsstelle und Betreuungsstelle - Flughafen Koeln/Bonn")
-        r2.font.size=Pt(11); r2.font.name="Aptos"
+        r2.font.size=Pt(8); r2.font.name="Aptos"
         hdr.add_paragraph("_"*90)
 
     def _add_footer(self,doc):
@@ -209,7 +209,7 @@ class StaerkemeldungDashboardExport:
         fp.alignment=WD_ALIGN_PARAGRAPH.CENTER
         sl=f"   |   Stationsleitung: {self._stationslt}" if self._stationslt else ""
         fr=fp.add_run(f"Tel: {TEL}   |   {MAIL}{sl}")
-        fr.font.size=Pt(11); fr.font.color.rgb=_rgb("777777"); fr.font.name="Aptos"
+        fr.font.size=Pt(8); fr.font.color.rgb=_rgb("777777"); fr.font.name="Aptos"
 
     def _fill_body(self,doc,warnungen):
         L_W=Cm(5.5); R_W=Cm(14.0)
@@ -252,10 +252,10 @@ class StaerkemeldungDashboardExport:
 
     def _build_links(self,lc):
         sl_tag=self._find_sl(False); sl_nacht=self._find_sl(True)
-        _para(lc,"Deutsches Rotes Kreuz",bold=True,size=11.5,fg="000000",align="center",sb=2)
-        _para(lc,"Kreisverband Koeln e.V.",size=10,fg="000000",align="center")
-        _para(lc,"Erste-Hilfe-Station - Flughafen Koeln/Bonn",size=9,fg="000000",align="center")
-        _para(lc,TEL,bold=True,size=10,fg="000000",align="center",sa=1)
+        _para(lc,"Deutsches Rotes Kreuz",bold=True,size=8.5,fg="000000",align="center",sb=2)
+        _para(lc,"Kreisverband Koeln e.V.",size=7,fg="000000",align="center")
+        _para(lc,"Erste-Hilfe-Station - Flughafen Koeln/Bonn",size=6,fg="000000",align="center")
+        _para(lc,TEL,bold=True,size=7,fg="000000",align="center",sa=1)
         _trenn(lc,AZ)
         try:
             from database.pax_db import lade_jahres_pax,lade_tages_pax,lade_jahres_einsaetze,lade_tages_einsaetze
@@ -272,9 +272,9 @@ class StaerkemeldungDashboardExport:
         ]:
             p=lc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_before=Pt(2); p.paragraph_format.space_after=Pt(0)
-            r1=p.add_run(f"{lbl}\n"); r1.font.size=Pt(9.5); r1.font.color.rgb=_rgb("000000")
+            r1=p.add_run(f"{lbl}\n"); r1.font.size=Pt(6.5); r1.font.color.rgb=_rgb("000000")
             r1.bold=True; r1.font.name="Aptos"
-            r2=p.add_run(val); r2.bold=False; r2.font.size=Pt(14); r2.font.color.rgb=_rgb("000000")
+            r2=p.add_run(val); r2.bold=False; r2.font.size=Pt(11); r2.font.color.rgb=_rgb("000000")
             r2.font.name="Aptos"
         _trenn(lc,AZ)
         for lbl,val in [
@@ -283,40 +283,40 @@ class StaerkemeldungDashboardExport:
         ]:
             p=lc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_before=Pt(2); p.paragraph_format.space_after=Pt(0)
-            r1=p.add_run(f"{lbl}\n"); r1.font.size=Pt(9.5); r1.font.color.rgb=_rgb("000000")
+            r1=p.add_run(f"{lbl}\n"); r1.font.size=Pt(6.5); r1.font.color.rgb=_rgb("000000")
             r1.bold=True; r1.font.name="Aptos"
-            r2=p.add_run(val); r2.bold=False; r2.font.size=Pt(14); r2.font.color.rgb=_rgb("000000")
+            r2=p.add_run(val); r2.bold=False; r2.font.size=Pt(11); r2.font.color.rgb=_rgb("000000")
             r2.font.name="Aptos"
         _trenn(lc,AZ,oben=True)
-        _para(lc,"SCHICHTLEITER",bold=True,size=9.5,fg="000000",align="center",sb=1)
+        _para(lc,"SCHICHTLEITER",bold=True,size=6.5,fg="000000",align="center",sb=1)
         for label,sl in [("Tag: ",sl_tag),("Nacht:",sl_nacht)]:
             if sl:
-                _para(lc,f"{label}  {sl[0]}",size=10.5,fg="000000",align="center",sb=0)
-                _para(lc,sl[1],size=9.5,fg="000000",align="center",sa=0)
+                _para(lc,f"{label}  {sl[0]}",size=7.5,fg="000000",align="center",sb=0)
+                _para(lc,sl[1],size=6.5,fg="000000",align="center",sa=0)
         if not sl_tag and not sl_nacht:
-            _para(lc,"-",size=11,fg="000000",align="center")
+            _para(lc,"-",size=8,fg="000000",align="center")
         _trenn(lc,AZ,oben=True)
         fc_hex,lbl_bul=_bul_farben(self._bul_aktiv)
-        _para(lc,"BULMOR - FAHRZEUGSTATUS",bold=True,size=9.5,fg="000000",align="center",sb=1)
+        _para(lc,"BULMOR - FAHRZEUGSTATUS",bold=True,size=6.5,fg="000000",align="center",sb=1)
         bul_tbl=lc.add_table(rows=1,cols=self.BULMOR_GESAMT); bul_tbl.style="Table Grid"
         for i in range(self.BULMOR_GESAMT):
             c=bul_tbl.cell(0,i); _set_bg(c,fc_hex if i<self._bul_aktiv else "444444")
             p=c.add_paragraph(f"B{i+1}"); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_before=Pt(1); p.paragraph_format.space_after=Pt(1)
-            p.runs[0].font.size=Pt(10); p.runs[0].font.color.rgb=_rgb(WEISS)
+            p.runs[0].font.size=Pt(7); p.runs[0].font.color.rgb=_rgb(WEISS)
             p.runs[0].bold=True; p.runs[0].font.name="Aptos"
         ges=lc.add_paragraph(); ges.alignment=WD_ALIGN_PARAGRAPH.CENTER
         ges.paragraph_format.space_before=Pt(1); ges.paragraph_format.space_after=Pt(0)
         r1=ges.add_run(f"{self._bul_aktiv}/{self.BULMOR_GESAMT}  ")
-        r1.bold=True; r1.font.size=Pt(14); r1.font.color.rgb=_rgb(fc_hex); r1.font.name="Aptos"
-        r2=ges.add_run(lbl_bul); r2.font.size=Pt(11); r2.font.color.rgb=_rgb(fc_hex); r2.font.name="Aptos"
+        r1.bold=True; r1.font.size=Pt(11); r1.font.color.rgb=_rgb(fc_hex); r1.font.name="Aptos"
+        r2=ges.add_run(lbl_bul); r2.font.size=Pt(8); r2.font.color.rgb=_rgb(fc_hex); r2.font.name="Aptos"
 
     def _build_rechts(self,rc):
         datum_str=self._von.strftime("%d.%m.%Y"); bis_str=self._bis.strftime("%d.%m.%Y")
         sl_tag=self._find_sl(False); sl_nacht=self._find_sl(True)
         ph=rc.add_paragraph(); ph.alignment=WD_ALIGN_PARAGRAPH.CENTER
         ph.paragraph_format.space_before=Pt(2); ph.paragraph_format.space_after=Pt(4)
-        rh=ph.add_run("STÄRKEMELDUNG"); rh.font.bold=True; rh.font.size=Pt(16)
+        rh=ph.add_run("STÄRKEMELDUNG"); rh.font.bold=True; rh.font.size=Pt(13)
         rh.font.color.rgb=_rgb("000000"); rh.font.name="Aptos"
         pz=rc.add_paragraph()
         pz.paragraph_format.space_before=Pt(0); pz.paragraph_format.space_after=Pt(6)
@@ -327,12 +327,12 @@ class StaerkemeldungDashboardExport:
         ind_pz=OxmlElement("w:ind"); ind_pz.set(qn("w:left"),"2550"); ind_pz.set(qn("w:hanging"),"2550")
         pPr_pz.append(ind_pz)
         zeitraum=datum_str if datum_str==bis_str else f"{datum_str} bis {bis_str}"
-        rz=pz.add_run(f"Zeitraum:\t{zeitraum}"); rz.font.size=Pt(14); rz.font.bold=False
+        rz=pz.add_run(f"Zeitraum:\t{zeitraum}"); rz.font.size=Pt(11); rz.font.bold=False
         rz.font.name="Aptos"
         if sl_tag or sl_nacht:
             ph_sl=rc.add_paragraph()
             ph_sl.paragraph_format.space_before=Pt(2); ph_sl.paragraph_format.space_after=Pt(1)
-            rh_sl=ph_sl.add_run("Schichtleiter"); rh_sl.font.bold=True; rh_sl.font.size=Pt(14)
+            rh_sl=ph_sl.add_run("Schichtleiter"); rh_sl.font.bold=True; rh_sl.font.size=Pt(11)
             rh_sl.font.name="Aptos"
             for label,sl in [("Tag:  ",sl_tag),("Nacht:",sl_nacht)]:
                 if not sl: continue
@@ -343,16 +343,16 @@ class StaerkemeldungDashboardExport:
                 ind=OxmlElement("w:ind"); ind.set(qn("w:left"),"2550"); ind.set(qn("w:hanging"),"2550")
                 pPr.append(ind)
                 p_sl.paragraph_format.space_before=Pt(0); p_sl.paragraph_format.space_after=Pt(0)
-                r_pf=p_sl.add_run(f"{label}\t"); r_pf.font.size=Pt(13.5); r_pf.font.name="Aptos"
-                r_nm=p_sl.add_run(f"{sl[0]}  ({sl[1]})"); r_nm.font.size=Pt(13.5); r_nm.bold=False
+                r_pf=p_sl.add_run(f"{label}\t"); r_pf.font.size=Pt(10.5); r_pf.font.name="Aptos"
+                r_nm=p_sl.add_run(f"{sl[0]}  ({sl[1]})"); r_nm.font.size=Pt(10.5); r_nm.bold=False
                 r_nm.font.name="Aptos"
             rc.add_paragraph().paragraph_format.space_after=Pt(2)
         ph_d=rc.add_paragraph(); ph_d.paragraph_format.space_before=Pt(2); ph_d.paragraph_format.space_after=Pt(1)
-        rh_d=ph_d.add_run("Disposition"); rh_d.font.bold=True; rh_d.font.size=Pt(14)
+        rh_d=ph_d.add_run("Disposition"); rh_d.font.bold=True; rh_d.font.size=Pt(11)
         rh_d.font.name="Aptos"
         _zeitgruppen_para(rc,_zeitgruppen(self._dispo,ist_dispo=True))
         rc.add_paragraph().paragraph_format.space_after=Pt(2)
         ph_b=rc.add_paragraph(); ph_b.paragraph_format.space_before=Pt(2); ph_b.paragraph_format.space_after=Pt(1)
-        rh_b=ph_b.add_run("Behindertenbetreuer"); rh_b.font.bold=True; rh_b.font.size=Pt(14)
+        rh_b=ph_b.add_run("Behindertenbetreuer"); rh_b.font.bold=True; rh_b.font.size=Pt(11)
         rh_b.font.name="Aptos"
         _zeitgruppen_para(rc,_zeitgruppen(self._betreuer))
