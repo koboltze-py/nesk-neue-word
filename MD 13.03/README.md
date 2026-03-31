@@ -3,8 +3,14 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.6.0 (26.03.2026)  
+**Version:** v3.7.0 (31.03.2026)  
 **Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen**
+
+### Neu in v3.7.0
+- **Dashboard Word-Export überarbeitet**: Aptos-Schrift, alle Texte schwarz, kein blauer Hintergrund, SCHICHTLEITER-Block aus Sidebar entfernt
+- **Zeitraum fett**: Label in der Stärkemeldung fett, Wert nicht fett, tab-ausgerichtet
+- **Schichtleiter-Darstellung**: Uhrzeit als Tab-Label (fett), Name als Wert – kein „Tag:" / „Nacht:"-Präfix
+- **Sidebar +2pt**: Alle Sidebar-Schriften vergrößert, PAX/Einsätze-Werte 13pt
 
 ### Neu in v3.6.0
 - **Schulungen – Mitarbeiter-Liste** (neuer Tab neben Kalender): Suche nach Name, Filter nach Status & Schulungstyp; Matrix EH/Refresher/ZÜP/Ärztl./FS-K. mit Farbkodierung; Mitarbeiter ohne Einträge gesondert grau

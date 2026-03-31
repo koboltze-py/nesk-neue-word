@@ -5,6 +5,23 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 31.03.2026 – v3.7.0
+
+### Dashboard – Stärkemeldung Word-Export komplett überarbeitet
+
+#### `functions/staerkemeldung_dashboard_export.py`
+- **Schrift durchgängig Aptos** (alle Runs: `r.font.name = "Aptos"`)
+- **Alle Texte schwarz** (`"000000"`) – kein weißer Text mehr
+- **Kein Hintergrund** – `BG_DUNKEL`-Hintergrund aus der linken Sidebar entfernt
+- **SCHICHTLEITER-Block aus der Sidebar entfernt** – kein separater Block mehr links
+- **Zeitraum-Zeile**: Label „Zeitraum:" fett, Datum-Wert nicht fett, tab-ausgerichtet (Tab-Stop 2550)
+- **Schichtleiter-Zeilen**: Uhrzeit als Tab-Label (fett), Name als Wert (nicht fett) – kein „Tag:" / „Nacht:"-Präfix
+- **Sidebar-Schriften +2pt** vergrößert (DRK-Name: 10,5 pt, Kreisverband: 9 pt, Station: 8 pt)
+- **PAX/Einsätze-Werte**: 13 pt (war 11 pt)
+- Batch-Test: 31/31 März-Exporte fehlerfrei (`_test_dashboard_maerz.py`)
+
+---
+
 ## 26.03.2026 – v3.6.0
 
 ### Schulungen-Modul – Mitarbeiter-Liste, Suche/Filter und Datum-Bearbeitung

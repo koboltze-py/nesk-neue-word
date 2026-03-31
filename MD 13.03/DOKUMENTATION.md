@@ -1,6 +1,6 @@
 # Nesk3 – Technische Dokumentation
 
-**Stand:** 26.03.2026 – v3.6.0  
+**Stand:** 31.03.2026 – v3.7.0  
 **Anwendung:** Nesk3 – DRK Flughafen Köln/Bonn  
 **Zweck:** Dienstplan-Verwaltung, Stärkemeldung, Mitarbeiterverwaltung, Einsatzprotokoll, Verspätungs-Meldungen, Telefonnummern-Verzeichnis, PSA-Tracking, Hilfe-Screenshot-Galerie, Passagieranfragen, **Schulungs-Verwaltung**
 
