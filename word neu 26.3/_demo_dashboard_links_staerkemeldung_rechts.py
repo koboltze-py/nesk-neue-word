@@ -145,7 +145,7 @@ def _zeitgruppen_para(cell, gruppen: dict, size=9.5):
         ind.set(qn("w:left"), "2550"); ind.set(qn("w:hanging"), "2550")
         pPr.append(ind)
         p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after  = Pt(1)  # Zeilenabstand zwischen Zeitgruppen
+        p.paragraph_format.space_after  = Pt(4)  # Zeilenabstand zwischen Zeitgruppen
         rz = p.add_run(f"{zeit}\t"); rz.font.size = Pt(size)
         rn = p.add_run(" / ".join(namen)); rn.font.size = Pt(size)
 
@@ -373,7 +373,7 @@ def erstelle_demo():
     rp2.font.size = Pt(9); rp2.bold = True
 
     # ── Speichern ─────────────────────────────────────────────────────────────
-    out = ZIEL / f"DEMO_Dashboard_v4_{DATUM.replace('.','')}.docx"
+    out = ZIEL / f"DEMO_Dashboard_v5_{DATUM.replace('.','')}.docx"
     doc.save(str(out))
     print(f"[OK] Gespeichert: {out}")
     return str(out)
