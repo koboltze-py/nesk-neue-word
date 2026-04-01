@@ -330,13 +330,13 @@ class SanmatDB:
 
     def entnehmen(self, artikel_id: int, artikel_name: str, menge: int,
                   datum: str, typ: str = "entnahme", von: str = "",
-                  bemerkung: str = "") -> tuple[bool, str]:
+                  bemerkung: str = "", negativ_erlaubt: bool = False) -> tuple[bool, str]:
         conn = self._conn()
         try:
             cur = conn.execute("SELECT menge FROM bestand WHERE artikel_id = ?", (artikel_id,))
             row = cur.fetchone()
             aktuell = row["menge"] if row else 0
-            if menge > aktuell:
+            if not negativ_erlaubt and menge > aktuell:
                 conn.close()
                 return False, f"Nicht genug auf Lager (Bestand: {aktuell})."
             conn.execute("""
