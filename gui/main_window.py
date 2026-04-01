@@ -153,6 +153,7 @@ from gui.telefonnummern         import TelefonnummernWidget
 from gui.call_transcription     import CallTranscriptionWidget
 from gui.backup_widget          import BackupWidget
 from gui.passagiere             import PassagiereWidget
+from gui.sanmat.main_widget     import SanmatWidget
 
 
 NAV_ITEMS = [
@@ -169,6 +170,7 @@ NAV_ITEMS = [
     ("♿", "Call Transcription",  10),
     ("💾", "Backup",             11),
     ("⚙️",  "Einstellungen",    12),
+    ("🩺", "Sanitätsmaterial",  13),
 ]
 
 NAV_TOOLTIPS = [
@@ -185,6 +187,7 @@ NAV_TOOLTIPS = [
     "Anrufprotokoll: Anrufinhalte mit Textbausteinen schnell erfassen und verwalten",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
+    "Sanitätsmaterial verwalten: Artikel, Bestand, Entnahme und Buchungsverlauf",
 ]
 
 
@@ -376,6 +379,7 @@ class MainWindow(QMainWindow):
         self._backup_page            = BackupWidget()
         self._settings_page          = EinstellungenWidget()
         self._passagiere_page        = PassagiereWidget()
+        self._sanmat_page            = SanmatWidget()
 
         for page in [self._dashboard_page, self._mitarbeiter_page,
                      self._dienstliches_page,
@@ -385,7 +389,8 @@ class MainWindow(QMainWindow):
                      self._passagiere_page,
                      self._telefonnummern_page,
                      self._call_transcription_page,
-                     self._backup_page, self._settings_page]:
+                     self._backup_page, self._settings_page,
+                     self._sanmat_page]:
             self._stack.addWidget(page)
 
         layout.addWidget(self._stack)

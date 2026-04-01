@@ -27,3 +27,21 @@ Daten/Patienten Station/
 Daten/Einsatz/Protokolle/
 Daten/AOCC/*.xlsm
 build_log.txt
+
+# Betriebsdaten / persönliche Daten
+Daten/Handy PUK und Nummern/
+Daten/Pat. Station/
+Daten/Sonderaufgaben/
+Daten/Stammdaten Schulungen/
+Daten/Spät/*.docx
+Daten/Spät/Protokoll/
+
+# Binärdateien / EXE
+G EXE/
+turso exe/
+
+# Backup-Ordner
+Backup Neu ab 20.03/
+
+# Word-Demo-Dateien (binär, groß)
+word neu 26.3/*.docx
