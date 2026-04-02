@@ -5,6 +5,24 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 02.04.2026 – v3.8.0
+
+### Sanitätsmaterial-Verbrauch – Excel-Export statt CSV
+
+#### `gui/sanmat/verbrauch.py`
+- **Export-Format geändert**: Button „CSV Export“ → „Excel Export“, Speicherdialog gibt `.xlsx` aus
+- **openpyxl-Export**: Strukturierte `.xlsx`-Datei mit Formatierung (kein CSV mehr)
+- **Aufbau der Ausgabe**:
+  - Titelzeile (dunkelgrau, weiße Schrift): „Sanitätsmaterial-Verbrauchsprotokoll – DRK Erste-Hilfe-Station FKB“
+  - Zeitraum-Zeile: Exportdatum + gefilterter Zeitraum
+  - Spalten-Header: Datum / Einsatz/Grund / Artikel / Menge / Entnehmer / Notiz
+  - Datums-Trennzeilen (blaugrau) mit allen Buchungen darunter, nach Einsatz gruppiert
+  - Gesamtübersicht am Ende: alle verbrauchten Artikel alphabetisch mit Menge + Einheit „Einsatz/Notiz“
+- Freeze ab Zeile 4, keine Gitternetzlinien
+- `import openpyxl`, `from openpyxl.styles import …`, `from collections import defaultdict` ergänzt
+
+---
+
 ## 31.03.2026 – v3.7.0
 
 ### Dashboard – Stärkemeldung Word-Export komplett überarbeitet

@@ -3,8 +3,11 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.7.0 (31.03.2026)  
-**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen**
+**Version:** v3.8.0 (02.04.2026)  
+**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen** · **Sanitätsmaterial**
+
+### Neu in v3.8.0
+- **Sanitätsmaterial Verbrauch – Excel-Export**: Export gibt jetzt `.xlsx` statt CSV aus; formatierte Darstellung nach Datum gruppiert, Datums-Trennzeilen, Gesamtübersicht aller verbrauchten Artikel alphabetisch mit Menge; Notiz-Spalte ergänzt
 
 ### Neu in v3.7.0
 - **Dashboard Word-Export überarbeitet**: Aptos-Schrift, alle Texte schwarz, kein blauer Hintergrund, SCHICHTLEITER-Block aus Sidebar entfernt
