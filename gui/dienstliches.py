@@ -3413,6 +3413,39 @@ class _EinsaetzeTab(QWidget):
         )
         if antwort == QMessageBox.StandardButton.Yes:
             try:
+                # Sanmat-Rückbuchung: Buchungen mit "(ID <einsatz_id>)" suchen und zurückbuchen
+                try:
+                    if _SanmatDB is not None:
+                        db = _SanmatDB()
+                        db.initialize()
+                        buchungen = db.get_buchungen(
+                            suche=f"(ID {e['id']})",
+                            typ="verbrauch",
+                            limit=500,
+                        )
+                        # Nur die exakt passende Einsatz-ID verwenden
+                        import re as _re
+                        ziel_pattern = _re.compile(rf"\(ID {e['id']}\)")
+                        datum_raw = e.get("datum", "")
+                        try:
+                            t = datum_raw.split(".")
+                            datum_iso = f"{t[2]}-{t[1]}-{t[0]}" if len(t) == 3 else datum_raw
+                        except Exception:
+                            datum_iso = datum_raw
+                        stichwort = e.get("einsatzstichwort", "") or f"Einsatz-ID {e['id']}"
+                        for buch in buchungen:
+                            if ziel_pattern.search(buch.get("bemerkung", "")):
+                                db.einlagern(
+                                    artikel_id=buch["artikel_id"],
+                                    artikel_name=buch["artikel_name"],
+                                    menge=abs(buch["menge"]),
+                                    datum=datum_iso,
+                                    von=e.get("drk_ma1", ""),
+                                    bemerkung=f"Rückbuchung gelöschter Einsatz: {stichwort}  (ID {e['id']})",
+                                    typ="rueckgabe",
+                                )
+                except Exception:
+                    pass  # Rückbuchung scheitert lautlos – Löschung trotzdem durchführen
                 einsatz_loeschen(e["id"])
                 self.refresh()
             except Exception as exc:
