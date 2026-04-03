@@ -148,6 +148,10 @@ def _ensured_patienten_db() -> str:
             con.execute(f"ALTER TABLE patienten ADD COLUMN {col} {typ}")
         except Exception:
             pass  # Spalte existiert bereits
+    try:
+        con.execute("ALTER TABLE verbrauchsmaterial ADD COLUMN artikel_id INTEGER DEFAULT NULL")
+    except Exception:
+        pass  # Spalte existiert bereits
     con.commit()
     con.close()
     return _PATIENTEN_DB_PFAD
@@ -251,8 +255,8 @@ def patient_speichern(daten: dict, verbrauchsmaterial: list[dict]) -> int:
         patienten_id = cur.lastrowid
         for vm in verbrauchsmaterial:
             con.execute(
-                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
-                (patienten_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
+                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit, artikel_id) VALUES (?, ?, ?, ?, ?)",
+                (patienten_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"), vm.get("artikel_id"))
             )
         for med in daten.get("_medikamente", []):
             con.execute(
@@ -333,8 +337,8 @@ def patient_aktualisieren(row_id: int, daten: dict, verbrauchsmaterial: list[dic
         con.execute("DELETE FROM verbrauchsmaterial WHERE patienten_id=?", (row_id,))
         for vm in verbrauchsmaterial:
             con.execute(
-                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit) VALUES (?, ?, ?, ?)",
-                (row_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"))
+                "INSERT INTO verbrauchsmaterial (patienten_id, material, menge, einheit, artikel_id) VALUES (?, ?, ?, ?, ?)",
+                (row_id, vm.get("material", ""), vm.get("menge", 1), vm.get("einheit", "Stk"), vm.get("artikel_id"))
             )
         con.execute("DELETE FROM medikamente WHERE patienten_id=?", (row_id,))
         for med in daten.get("_medikamente", []):
@@ -2864,6 +2868,35 @@ class _PatientenTab(QWidget):
         )
         if antwort == QMessageBox.StandardButton.Yes:
             try:
+                # Sanmat-Rückbuchung: verbrauchtes Material zurück ins Lager
+                try:
+                    vm_liste = lade_verbrauchsmaterial(eintrag["id"])
+                    rueck_mit_id = [m for m in vm_liste if m.get("artikel_id")]
+                    if rueck_mit_id and _SanmatDB is not None:
+                        import time as _time
+                        db = _SanmatDB()
+                        db.initialize()
+                        datum_raw = eintrag.get("datum", "")
+                        try:
+                            t = datum_raw.split(".")
+                            datum_iso = f"{t[2]}-{t[1]}-{t[0]}" if len(t) == 3 else datum_raw
+                        except Exception:
+                            datum_iso = datum_raw
+                        entnehmer = eintrag.get("drk_ma1", "")
+                        name = eintrag.get("patient_name") or eintrag.get("patient_typ") or f"Patient {eintrag['id']}"
+                        bem = f"Rückbuchung gelöschter Pat.: {name}"
+                        for pos in rueck_mit_id:
+                            db.einlagern(
+                                artikel_id=pos["artikel_id"],
+                                artikel_name=pos["material"],
+                                menge=pos["menge"],
+                                datum=datum_iso,
+                                von=entnehmer,
+                                bemerkung=bem,
+                                typ="rueckgabe",
+                            )
+                except Exception:
+                    pass  # Rückbuchung scheitert lautlos – Löschung trotzdem durchführen
                 patient_loeschen(eintrag["id"])
                 self.refresh()
                 QMessageBox.information(self, "Gelöscht", "Patient wurde gelöscht.")
