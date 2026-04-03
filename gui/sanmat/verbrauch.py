@@ -836,7 +836,7 @@ class VerbrauchView(QWidget):
         lay.addWidget(QLabel("<b>📋  Verbrauchsgruppe anlegen</b>"))
         lay.addWidget(QLabel(
             "<span style='color:#666;font-size:11px;'>"
-            "Für Verbräuche außerhalb von Einsätzen (Übung, Ablauf, Eigenbedarf …)"
+            "Gruppenname frei definieren – z.B. 'Schicht 04.04.', 'Einsatz XY', 'Patient-Station' …"
             "</span>"
         ))
 
@@ -844,11 +844,12 @@ class VerbrauchView(QWidget):
         form_top = QFormLayout()
         form_top.setSpacing(8)
         le_stichwort = QLineEdit()
-        le_stichwort.setPlaceholderText("z.B. Übung 02.04.2026, MHD-Abgang April …")
-        form_top.addRow("Bezeichnung:", le_stichwort)
+        le_stichwort.setPlaceholderText("z.B. Schicht 04.04.2026, Einsatz Inland 1, MHD-Abgang April …")
+        form_top.addRow("Gruppenname *:", le_stichwort)
         cb_grund = QComboBox()
+        cb_grund.addItem("(kein Grund)")
         cb_grund.addItems(self.GRUENDE)
-        form_top.addRow("Grund:", cb_grund)
+        form_top.addRow("Grund (optional):", cb_grund)
         le_entnehmer = QLineEdit()
         le_entnehmer.setPlaceholderText("Name …")
         form_top.addRow("Entnehmer:", le_entnehmer)
@@ -985,8 +986,15 @@ class VerbrauchView(QWidget):
                                     "Bitte mindestens einen Artikel in den Warenkorb legen.")
                 return
             bezeichnung = le_stichwort.text().strip()
+            if not bezeichnung:
+                QMessageBox.warning(dlg, "Gruppenname fehlt",
+                                    "Bitte einen Gruppenname / Oberbegriff eingeben.")
+                return
             grund = cb_grund.currentText()
-            stichwort = f"{grund}: {bezeichnung}" if bezeichnung else grund
+            if grund == "(kein Grund)":
+                stichwort = bezeichnung
+            else:
+                stichwort = f"{bezeichnung}  [{grund}]"
             entnehmer = le_entnehmer.text().strip()
             datum_iso = de_datum.date().toString("yyyy-MM-dd")
             ok, msg = self._db.buche_verbrauch_gruppe(

@@ -2288,36 +2288,18 @@ class _PatientenDialog(QDialog):
 
     # ── Verbrauchsmaterial ──────────────────────────────────────────────────────────────────
     def _material_hinzufuegen(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Material hinzufügen")
-        dlg.setMinimumWidth(400)
-        layout = QVBoxLayout(dlg)
-        fl = QFormLayout()
-        material_edit = QLineEdit()
-        material_edit.setPlaceholderText("z.B. Pflaster, Kompresse, Handschuhe …")
-        menge_spin = QSpinBox()
-        menge_spin.setRange(1, 999)
-        menge_spin.setValue(1)
-        einheit_combo = QComboBox()
-        einheit_combo.addItems(["Stk", "Paar", "Pkg", "ml"])
-        einheit_combo.setEditable(True)
-        fl.addRow("Material:", material_edit)
-        fl.addRow("Menge:", menge_spin)
-        fl.addRow("Einheit:", einheit_combo)
-        layout.addLayout(fl)
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        btns.accepted.connect(lambda: dlg.accept() if material_edit.text().strip() else None)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
+        if _SanmatDB is None:
+            QMessageBox.warning(self, "Sanmat", "Sanmat-Modul nicht verfügbar.")
+            return
+        dlg = _ArtikelPickerDialog(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            material = material_edit.text().strip()
-            if material:
+            auswahl = dlg.get_auswahl()
+            if auswahl:
                 self._verbrauchsmaterial_liste.append({
-                    "material": material,
-                    "menge": menge_spin.value(),
-                    "einheit": einheit_combo.currentText()
+                    "material":   auswahl["bezeichnung"],
+                    "menge":      auswahl["menge"],
+                    "einheit":    "Stk",
+                    "artikel_id": auswahl["artikel_id"],
                 })
                 self._aktualisiere_material_tabelle()
 
@@ -2810,8 +2792,45 @@ class _PatientenTab(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             daten, material = dlg.get_data()
             try:
-                patient_speichern(daten, material)
+                patient_id = patient_speichern(daten, material)
                 self.refresh()
+                # Sanmat-Buchung (nur Positionen mit artikel_id)
+                verbrauch_mit_id = [m for m in material if m.get("artikel_id")]
+                if verbrauch_mit_id and _SanmatDB is not None:
+                    try:
+                        import time as _time
+                        db = _SanmatDB()
+                        db.initialize()
+                        datum_raw = daten.get("datum", "")
+                        try:
+                            t = datum_raw.split(".")
+                            datum_iso = f"{t[2]}-{t[1]}-{t[0]}" if len(t) == 3 else datum_raw
+                        except Exception:
+                            datum_iso = datum_raw
+                        entnehmer = daten.get("drk_ma1", "")
+                        gid = int(_time.time())
+                        name = daten.get("patient_name") or daten.get("patient_typ") or f"Patient {patient_id}"
+                        stichwort = f"Pat.-Station: {name}  (GID {gid})"
+                        fehler = []
+                        for pos in verbrauch_mit_id:
+                            ok, msg = db.entnehmen(
+                                artikel_id=pos["artikel_id"],
+                                artikel_name=pos["material"],
+                                menge=pos["menge"],
+                                datum=datum_iso,
+                                typ="verbrauch",
+                                von=entnehmer,
+                                bemerkung=stichwort,
+                                negativ_erlaubt=True,
+                            )
+                            if not ok:
+                                fehler.append(f"{pos['material']}: {msg}")
+                        if fehler:
+                            QMessageBox.warning(self, "Sanmat-Buchung",
+                                "Einige Buchungen fehlgeschlagen:\n" + "\n".join(fehler))
+                    except Exception as exc:
+                        QMessageBox.warning(self, "Sanmat-Buchung",
+                            f"Fehler beim Buchen des Verbrauchsmaterials:\n{exc}")
                 QMessageBox.information(self, "Erfolg", "Patient erfolgreich erfasst.")
             except Exception as exc:
                 QMessageBox.critical(self, "Fehler beim Speichern", str(exc))
