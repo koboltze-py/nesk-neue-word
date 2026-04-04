@@ -43,9 +43,12 @@ class _NeskLogoWidget(QWidget):
         super().__init__(parent)
         self._t0 = time.monotonic()
         self.setFixedSize(self.W, self.H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Doppelklick für 🎩 Alice's Wunderrad")
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(30)  # ~33 FPS
+        self._slot_dlg = None
 
     def paintEvent(self, event):
         t  = time.monotonic() - self._t0
@@ -139,6 +142,24 @@ class _NeskLogoWidget(QWidget):
         p.drawText(QPointF(cx - sw / 2, ty + 17), sub)
 
         p.end()
+
+    def mouseDoubleClickEvent(self, event):
+        from gui.slot_machine import SlotMachineDialog
+        if self._slot_dlg is None or not self._slot_dlg.isVisible():
+            self._slot_dlg = SlotMachineDialog()
+            # Fenster zentriert über dem Haupt-Fenster positionieren
+            mw = self.window()
+            if mw:
+                center = mw.geometry().center()
+                self._slot_dlg.move(
+                    center.x() - self._slot_dlg.width() // 2,
+                    center.y() - self._slot_dlg.height() // 2,
+                )
+            self._slot_dlg.show()
+        else:
+            self._slot_dlg.raise_()
+            self._slot_dlg.activateWindow()
+
 from gui.dashboard        import DashboardWidget
 from gui.aufgaben_haupt   import AufgabenHauptWidget
 from gui.dienstplan       import DienstplanWidget
