@@ -1156,6 +1156,10 @@ class SlotMachineDialog(QDialog):
             locked_rows = {row for row, _ in self._hold_vals.get(ri, [])}
             results.append(_hold_col(locked_rows))
 
+        # Nicht-gehaltene Reels starten (sonst bleiben sie stopped=True)
+        for ri in non_held:
+            self._reels[ri].start()
+
         self._mode = "holdspinning"
 
         for j, ri in enumerate(non_held):
