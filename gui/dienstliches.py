@@ -377,6 +377,16 @@ def patient_loeschen(row_id: int) -> None:
                     typ="GID",
                     quelle_label=f"Pat.-Station: {_name}",
                 )
+            elif _row:
+                # Fallback für ältere Datensätze ohne sanmat_gid:
+                # Suche per Textmuster "Pat.-Station [typ]: name"
+                _patient_typ = (_row["patient_typ"] or "").strip()
+                _name = (_row["patient_name"] or _patient_typ or f"Patient {row_id}").strip()
+                _muster = f"Pat.-Station [{_patient_typ}]: {_name}"
+                _sanmat.handle_quelle_geloescht_textmuster(
+                    textmuster=_muster,
+                    quelle_label=f"Pat.-Station: {_name}",
+                )
         except Exception:
             pass
     with _patienten_db() as con:
