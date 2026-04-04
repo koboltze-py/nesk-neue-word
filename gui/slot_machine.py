@@ -55,8 +55,7 @@ _POOL = sum([[i] * SYMBOLS[i][3] for i in range(11)], [])   # Indices 0-10
 BET_LEVELS   = [5, 10, 20, 50, 100]
 _DEF_BET_IDX = 1        # 10 Credits
 
-# Pods
-POD_CAP    = 10
+# Pods  (kein fester Zähler – Bälle erhitzen den Pod, Bonus löst zufällig aus)
 POD_NAMES  = ["Herzkönigin", "Wunderland", "Goldschatz"]
 POD_EMOJIS = ["🔴", "🔵", "⭐"]
 POD_COLS   = ["#c62828", "#1565c0", "#f9a825"]
@@ -149,79 +148,126 @@ def evaluate_ways(grid: list[list[int]],
 
 # ── _PodWidget ────────────────────────────────────────────────────────────────
 class _PodWidget(QWidget):
-    """Zeigt Fortschritt eines Sammelpods (Bälle → Bonus)."""
+    """Pod: Bälle erhitzen ihn – je heißer desto wahrscheinlicher der Bonus."""
 
     def __init__(self, idx: int, parent=None) -> None:
         super().__init__(parent)
-        self.idx  = idx
-        self._cnt = 0
-        self._lit = False
-        self.setFixedSize(118, 50)
-        self.setToolTip(f"{POD_EMOJIS[idx]} {POD_NAMES[idx]}\n{POD_CAP} Bälle → Bonus!")
+        self.idx         = idx
+        self._heat       = 0.0   # 0.0 – 1.0
+        self._lit        = False
+        self._pulse      = 0.0
+        self._pulse_dir  = 1
+        self.setFixedSize(118, 54)
+        self.setToolTip(
+            f"{POD_EMOJIS[idx]} {POD_NAMES[idx]}\n"
+            "Bälle dieser Farbe erhitzen den Pod.\n"
+            "Je heißer, desto wahrscheinlicher löst er aus!"
+        )
+        self._ptimer = QTimer(self)
+        self._ptimer.timeout.connect(self._do_pulse)
+        self._ptimer.start(40)
+
+    def _do_pulse(self) -> None:
+        if self._heat < 0.04 and not self._lit:
+            return
+        spd = 0.03 + self._heat * 0.09
+        self._pulse += spd * self._pulse_dir
+        if self._pulse >= 1.0:
+            self._pulse = 1.0
+            self._pulse_dir = -1
+        elif self._pulse <= 0.0:
+            self._pulse = 0.0
+            self._pulse_dir = 1
+        self.update()
 
     @property
-    def count(self) -> int:
-        return self._cnt
+    def heat(self) -> float:
+        return self._heat
 
-    @count.setter
-    def count(self, v: int) -> None:
-        self._cnt = min(int(v), POD_CAP)
+    @heat.setter
+    def heat(self, v: float) -> None:
+        self._heat = max(0.0, min(1.0, float(v)))
         self.update()
 
-    def flash_full(self) -> None:
+    def flash_trigger(self) -> None:
+        """Kurzes Aufleuchten wenn Bonus ausgelöst wird."""
         self._lit = True
         self.update()
-        QTimer.singleShot(2000, self._unlit)
+        QTimer.singleShot(2400, self._unlit)
 
     def _unlit(self) -> None:
         self._lit = False
         self.update()
 
     def reset(self) -> None:
-        self._cnt = 0
-        self._lit = False
+        self._heat      = 0.0
+        self._lit       = False
+        self._pulse     = 0.0
+        self._pulse_dir = 1
         self.update()
 
     def paintEvent(self, _) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        W, H = self.width(), self.height()
-        base = QColor(POD_COLS[self.idx])
-        txt  = QColor(POD_TXT[self.idx])
+        W, H   = self.width(), self.height()
+        base   = QColor(POD_COLS[self.idx])
+        txt_c  = QColor(POD_TXT[self.idx])
+        glow   = self._pulse * self._heat
 
+        # Hintergrund-Glow
         bg = QColor(base)
-        bg.setAlpha(60 if self._lit else 22)
+        bg.setAlpha(200 if self._lit else int(12 + self._heat * 100 + glow * 60))
         p.fillRect(0, 0, W, H, QBrush(bg))
-        p.setPen(QPen(base, 1.5 if self._lit else 1.0))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 6, 6)
 
+        # Rand – pulsiert
+        bw = 1.0 + self._heat * 2.5 + glow * 2.0
+        bc = QColor(base)
+        bc.setAlpha(int(100 + self._heat * 155 + glow * 60))
+        p.setPen(QPen(bc, bw))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 7, 7)
+
+        # Name
         f = QFont("Segoe UI", 7, QFont.Weight.Bold)
         p.setFont(f)
-        p.setPen(QPen(txt))
+        p.setPen(QPen(txt_c))
         p.drawText(QRectF(2, 2, W - 4, 14), Qt.AlignmentFlag.AlignCenter,
                    f"{POD_EMOJIS[self.idx]} {POD_NAMES[self.idx]}")
 
-        f2 = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        # Status-Text
+        if self._lit:
+            status = "💥 BONUS!"
+        elif self._heat >= 0.75:
+            status = "🔥 HEISS!"
+        elif self._heat >= 0.4:
+            status = f"♨ {int(self._heat * 100)}%"
+        elif self._heat > 0.0:
+            status = f"· {int(self._heat * 100)}%"
+        else:
+            status = "kalt"
+        f2 = QFont("Segoe UI", 7, QFont.Weight.Bold)
         p.setFont(f2)
-        p.setPen(QPen(base))
-        p.drawText(QRectF(2, 15, W - 4, 13), Qt.AlignmentFlag.AlignCenter,
-                   f"{self._cnt} / {POD_CAP}")
+        p.setPen(QPen(txt_c))
+        p.drawText(QRectF(2, 17, W - 4, 13), Qt.AlignmentFlag.AlignCenter, status)
 
-        dot_r = 4.5
-        gap   = (W - 10) / max(POD_CAP - 1, 1)
-        for i in range(POD_CAP):
-            cx2 = 5.0 + i * gap
-            cy2 = float(H - 9)
-            if i < self._cnt:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(base))
-            else:
-                p.setPen(QPen(base, 1))
-                dk = QColor(base)
-                dk.setAlpha(30)
-                p.setBrush(QBrush(dk))
-            p.drawEllipse(QPointF(cx2, cy2), dot_r, dot_r)
+        # Wärme-Balken
+        bx, by, bh2, bww = 5.0, 33.0, 8.0, float(W - 10)
+        bg2 = QColor(base); bg2.setAlpha(28)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(bg2))
+        p.drawRoundedRect(QRectF(bx, by, bww, bh2), 3, 3)
+        if self._heat > 0.0:
+            fill_c = QColor(base); fill_c.setAlpha(int(160 + glow * 90))
+            p.setBrush(QBrush(fill_c))
+            p.drawRoundedRect(QRectF(bx, by, bww * self._heat, bh2), 3, 3)
+
+        # Glüh-Halo bei hoher Hitze
+        if self._heat >= 0.5:
+            halo = QColor(base)
+            halo.setAlpha(int(glow * self._heat * 55))
+            p.setBrush(QBrush(halo))
+            halo_r = 6.0 + glow * 8.0
+            p.drawEllipse(QPointF(W / 2.0, by + bh2 / 2), bww * self._heat / 2.0 + halo_r, bh2 + halo_r)
         p.end()
 
 
@@ -537,7 +583,7 @@ class SlotMachineDialog(QDialog):
         self._drag_pos  = None
 
         # Pods
-        self._pod_counts: list[int] = [0, 0, 0]
+        self._pod_heat: list[float] = [0.0, 0.0, 0.0]
 
         # Holding Spin
         self._hold_reels: set[int]                        = set()
@@ -910,23 +956,31 @@ class SlotMachineDialog(QDialog):
     # ── Ball-Verarbeitung ──────────────────────────────────────────────────────
     def _process_balls(self, grid: list[list[int]], bet: int
                        ) -> tuple[dict[int, list[tuple[int,int]]], list[int]]:
-        """Wertet alle Bälle im Grid aus → (ball_data, gefüllte_pods)."""
+        """Wertet alle Bälle im Grid aus → (ball_data, getriggerte_pods)."""
         ball_data: dict[int, list[tuple[int,int]]] = {}
-        filled:    list[int] = []
+        triggered: list[int] = []
         for ri, col in enumerate(grid):
             for row, sym in enumerate(col):
                 if sym in IS_BALL:
                     val = _ball_val(bet)
                     ball_data.setdefault(ri, []).append((row, val))
                     pod = BALL_TO_POD[sym]
-                    self._pod_counts[pod] += 1
-                    self._pods_ui[pod].count = self._pod_counts[pod]
-                    if self._pod_counts[pod] >= POD_CAP:
-                        self._pod_counts[pod] = 0
-                        self._pods_ui[pod].reset()
-                        self._pods_ui[pod].flash_full()
-                        filled.append(pod)
-        return ball_data, filled
+                    # Jeder Ball erhitzt den Pod um 12–30 %
+                    self._pod_heat[pod] = min(
+                        1.0,
+                        self._pod_heat[pod] + random.uniform(0.12, 0.30)
+                    )
+                    self._pods_ui[pod].heat = self._pod_heat[pod]
+                    # Zufalls-Trigger: Wahrscheinlichkeit steigt quadratisch mit Hitze
+                    if (random.random() < self._pod_heat[pod] ** 1.6
+                            and pod not in triggered):
+                        self._pods_ui[pod].flash_trigger()
+                        self._pod_heat[pod] = 0.0
+                        QTimer.singleShot(100, lambda pi=pod: setattr(
+                            self._pods_ui[pi], 'heat', 0.0)
+                        )
+                        triggered.append(pod)
+        return ball_data, triggered
 
     # ── Normale Auswertung ─────────────────────────────────────────────────────
     def _evaluate(self) -> None:
@@ -1039,12 +1093,17 @@ class SlotMachineDialog(QDialog):
                     val = _ball_val(self._hold_bet)
                     new_balls.append((ri, row, val))
                     pod = BALL_TO_POD[sym]
-                    self._pod_counts[pod] += 1
-                    self._pods_ui[pod].count = self._pod_counts[pod]
-                    if self._pod_counts[pod] >= POD_CAP:
-                        self._pod_counts[pod] = 0
-                        self._pods_ui[pod].reset()
-                        self._pods_ui[pod].flash_full()
+                    self._pod_heat[pod] = min(
+                        1.0,
+                        self._pod_heat[pod] + random.uniform(0.12, 0.30)
+                    )
+                    self._pods_ui[pod].heat = self._pod_heat[pod]
+                    if random.random() < self._pod_heat[pod] ** 1.6:
+                        self._pods_ui[pod].flash_trigger()
+                        self._pod_heat[pod] = 0.0
+                        QTimer.singleShot(100, lambda pi=pod: setattr(
+                            self._pods_ui[pi], 'heat', 0.0)
+                        )
                         QTimer.singleShot(200, lambda p=pod: self._award_pod_bonus(p))
 
         if new_balls:
