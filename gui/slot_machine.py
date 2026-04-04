@@ -548,6 +548,7 @@ class SlotMachineDialog(QDialog):
         # Free Games
         self._fs_left:      int              = 0
         self._fs_total:     int              = 0
+        self._fs_wins:      int              = 0   # akkumulierte Credits in FG
         self._sticky_wilds: set[tuple[int,int]] = set()
 
         self._reels:      list[_Reel]    = []
@@ -1111,6 +1112,7 @@ class SlotMachineDialog(QDialog):
         extra = max(0, alice_cnt - 3) * _FS_RETRIG
         self._fs_total = _FS_BASE + extra
         self._fs_left  = self._fs_total
+        self._fs_wins  = 0
         self._sticky_wilds.clear()
         self._mode_lbl.setText(
             f"👸  FREE GAMES!  {self._fs_total} Spins  ·  {_FS_MULT}×  ·  Sticky Wilds"
@@ -1185,6 +1187,7 @@ class SlotMachineDialog(QDialog):
         total, wins = evaluate_ways(grid, mult)
         if total > 0:
             self._credits += total
+            self._fs_wins  += total
             for sym, L, ways, prize in wins:
                 for ri in range(L):
                     hit = {r for r, s in enumerate(grid[ri])
@@ -1209,10 +1212,14 @@ class SlotMachineDialog(QDialog):
             r.flash_win()
         self._sticky_wilds.clear()
         self._mode_lbl.hide()
-        total = self._fs_total
+        spins = self._fs_total
+        wins  = self._fs_wins
         self._fs_total = 0
-        self._res_lbl.setText(f"👸  Free Games beendet!  {total} Spins gespielt.")
-        self._show_win_anim(f"👸 FREE GAMES ENDE  {total} Spins", "#e91e63")
+        self._fs_wins  = 0
+        self._res_lbl.setText(
+            f"👸  Free Games beendet!  {spins} Spins  ·  Gewinn: +{wins} Credits!"
+        )
+        self._show_win_anim(f"👸 FREE GAMES  +{wins} Credits!", "#e91e63")
         self._mode = "idle"
         self._check_can_spin()
 
