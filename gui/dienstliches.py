@@ -1135,6 +1135,60 @@ def _btn_light(text: str) -> QPushButton:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+#  Dialog: Rückbuchung – Mengenauswahl je Artikel
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _RueckbuchungsDialog(QDialog):
+    """Zeigt alle verbrauchten Artikel mit je einem Mengen-SpinBox zur Rückbuchung."""
+
+    def __init__(self, artikel: list[dict], titel: str = "Rückbuchung", parent=None):
+        """
+        artikel: list of dicts mit Schlüsseln 'name' (str) und 'menge' (int, max. rückbuchbar)
+        """
+        super().__init__(parent)
+        self.setWindowTitle(titel)
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        info = QLabel("Wähle für jeden Artikel die Rückbuchungsmenge (0 = nicht zurückbuchen):")
+        info.setWordWrap(True)
+        info.setStyleSheet("font-size:12px; color:#333;")
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        self._spins: list[tuple[dict, QSpinBox]] = []
+        for art in artikel:
+            spin = QSpinBox()
+            spin.setMinimum(0)
+            spin.setMaximum(art["menge"])
+            spin.setValue(art["menge"])  # Standard: alles zurückbuchen
+            spin.setFixedWidth(80)
+            form.addRow(f"{art['name']} (max. {art['menge']}):", spin)
+            self._spins.append((art, spin))
+        layout.addLayout(form)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("✅  Zurückbuchen")
+        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("⛔  Nicht zurückbuchen")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def get_auswahl(self) -> list[dict]:
+        """Gibt Liste der Artikel mit gewünschter Rückbuchungsmenge > 0 zurück."""
+        ergebnis = []
+        for art, spin in self._spins:
+            menge = spin.value()
+            if menge > 0:
+                ergebnis.append({**art, "menge": menge})
+        return ergebnis
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 #  Dialog: Einsatz erfassen / bearbeiten
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -2867,24 +2921,23 @@ class _PatientenTab(QWidget):
         if antwort != QMessageBox.StandardButton.Yes:
             return
         # Prüfen ob Sanmat-Material zum Zurückbuchen vorhanden
-        rueckbuchen = False
-        rueck_mit_id = []
+        rueck_auswahl = []
         try:
             vm_liste = lade_verbrauchsmaterial(eintrag["id"])
             rueck_mit_id = [m for m in vm_liste if m.get("artikel_id")]
             if rueck_mit_id and _SanmatDB is not None:
-                antwort2 = QMessageBox.question(
-                    self, "Material zurückbuchen?",
-                    f"{len(rueck_mit_id)} Artikel wurden aus dem Sanmat-Bestand verbraucht.\n\n"
-                    f"Sollen diese zurück ins Lager gebucht werden?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
+                artikel_dlg = _RueckbuchungsDialog(
+                    artikel=[{"name": m["material"], "menge": m["menge"],
+                               "artikel_id": m["artikel_id"]} for m in rueck_mit_id],
+                    titel="Material zurückbuchen?",
+                    parent=self,
                 )
-                rueckbuchen = (antwort2 == QMessageBox.StandardButton.Yes)
+                if artikel_dlg.exec() == QDialog.DialogCode.Accepted:
+                    rueck_auswahl = artikel_dlg.get_auswahl()
         except Exception:
             pass
         try:
-            if rueckbuchen:
+            if rueck_auswahl:
                 try:
                     db = _SanmatDB()
                     db.initialize()
@@ -2896,10 +2949,10 @@ class _PatientenTab(QWidget):
                         datum_iso = datum_raw
                     entnehmer = eintrag.get("drk_ma1", "")
                     bem = f"Rückbuchung gelöschter Pat.: {name}"
-                    for pos in rueck_mit_id:
+                    for pos in rueck_auswahl:
                         db.einlagern(
                             artikel_id=pos["artikel_id"],
-                            artikel_name=pos["material"],
+                            artikel_name=pos["name"],
                             menge=pos["menge"],
                             datum=datum_iso,
                             von=entnehmer,
@@ -3426,29 +3479,29 @@ class _EinsaetzeTab(QWidget):
         if antwort != QMessageBox.StandardButton.Yes:
             return
         # Prüfen ob Sanmat-Buchungen zum Zurückbuchen vorhanden
-        rueckbuchen = False
-        sanmat_buchungen = []
+        rueck_auswahl = []
+        db_ein = None
         try:
             if _SanmatDB is not None:
                 import re as _re
-                db = _SanmatDB()
-                db.initialize()
-                alle = db.get_buchungen(suche=f"(ID {e['id']})", typ="verbrauch", limit=500)
+                db_ein = _SanmatDB()
+                db_ein.initialize()
+                alle = db_ein.get_buchungen(suche=f"(ID {e['id']})", typ="verbrauch", limit=500)
                 ziel_pattern = _re.compile(rf"\(ID {e['id']}\)")
                 sanmat_buchungen = [b for b in alle if ziel_pattern.search(b.get("bemerkung", ""))]
                 if sanmat_buchungen:
-                    antwort2 = QMessageBox.question(
-                        self, "Material zurückbuchen?",
-                        f"{len(sanmat_buchungen)} Artikel wurden aus dem Sanmat-Bestand verbraucht.\n\n"
-                        f"Sollen diese zurück ins Lager gebucht werden?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.Yes,
+                    artikel_dlg = _RueckbuchungsDialog(
+                        artikel=[{"name": b["artikel_name"], "menge": abs(b["menge"]),
+                                   "artikel_id": b["artikel_id"]} for b in sanmat_buchungen],
+                        titel="Material zurückbuchen?",
+                        parent=self,
                     )
-                    rueckbuchen = (antwort2 == QMessageBox.StandardButton.Yes)
+                    if artikel_dlg.exec() == QDialog.DialogCode.Accepted:
+                        rueck_auswahl = artikel_dlg.get_auswahl()
         except Exception:
             pass
         try:
-            if rueckbuchen:
+            if rueck_auswahl and db_ein is not None:
                 try:
                     datum_raw = e.get("datum", "")
                     try:
@@ -3457,11 +3510,11 @@ class _EinsaetzeTab(QWidget):
                     except Exception:
                         datum_iso = datum_raw
                     stichwort = e.get("einsatzstichwort", "") or f"Einsatz-ID {e['id']}"
-                    for buch in sanmat_buchungen:
-                        db.einlagern(
-                            artikel_id=buch["artikel_id"],
-                            artikel_name=buch["artikel_name"],
-                            menge=abs(buch["menge"]),
+                    for pos in rueck_auswahl:
+                        db_ein.einlagern(
+                            artikel_id=pos["artikel_id"],
+                            artikel_name=pos["name"],
+                            menge=pos["menge"],
                             datum=datum_iso,
                             von=e.get("drk_ma1", ""),
                             bemerkung=f"Rückbuchung gelöschter Einsatz: {stichwort}  (ID {e['id']})",
