@@ -90,7 +90,8 @@ CREATE TABLE IF NOT EXISTS patienten (
     drk_ma1                 TEXT    DEFAULT '',
     drk_ma2                 TEXT    DEFAULT '',
     weitergeleitet          TEXT    DEFAULT '',
-    bemerkung               TEXT    DEFAULT ''
+    bemerkung               TEXT    DEFAULT '',
+    sanmat_gid              INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS verbrauchsmaterial (
@@ -136,6 +137,7 @@ def _ensured_patienten_db() -> str:
         ("medikamente_gegeben_was", "TEXT DEFAULT ''"),
         ("arbeitsunfall",           "INTEGER DEFAULT 0"),
         ("arbeitsunfall_details",   "TEXT DEFAULT ''"),
+        ("sanmat_gid",              "INTEGER DEFAULT NULL"),
     ]
     os.makedirs(_EINSATZ_DB_DIR, exist_ok=True)
     con = sqlite3.connect(_PATIENTEN_DB_PFAD, timeout=5)
@@ -357,8 +359,51 @@ def patient_aktualisieren(row_id: int, daten: dict, verbrauchsmaterial: list[dic
 
 
 def patient_loeschen(row_id: int) -> None:
-    with _patienten_db() as con:
-        con.execute("DELETE FROM patienten WHERE id=?", (row_id,))
+    # Sanmat-Verbrauch prüfen: entweder löschen oder als Quelle-gelöscht markieren
+    if _SanmatDB is not None:
+        import time as _time_mod
+        for _versuch in range(3):
+            try:
+                _sanmat = _SanmatDB()
+                _sanmat.initialize()
+                with _patienten_db() as _con:
+                    _row = _con.execute(
+                        "SELECT sanmat_gid, patient_name, patient_typ FROM patienten WHERE id=?",
+                        (row_id,)
+                    ).fetchone()
+                if _row and _row["sanmat_gid"]:
+                    _gid = _row["sanmat_gid"]
+                    _name = _row["patient_name"] or _row["patient_typ"] or f"Patient {row_id}"
+                    _sanmat.handle_quelle_geloescht(
+                        referenz_id=str(_gid),
+                        typ="GID",
+                        quelle_label=f"Pat.-Station: {_name}",
+                    )
+                elif _row:
+                    # Fallback für ältere Datensätze ohne sanmat_gid
+                    _patient_typ = (_row["patient_typ"] or "").strip()
+                    _name = (_row["patient_name"] or _patient_typ or f"Patient {row_id}").strip()
+                    _muster = f"Pat.-Station [{_patient_typ}]: {_name}"
+                    _sanmat.handle_quelle_geloescht_textmuster(
+                        textmuster=_muster,
+                        quelle_label=f"Pat.-Station: {_name}",
+                    )
+                break  # Erfolg
+            except Exception as _ex:
+                if _versuch < 2:
+                    _time_mod.sleep(0.4)
+                else:
+                    print(f"[Sanmat] patient_loeschen {row_id}: Markierung fehlgeschlagen: {_ex}")
+    for _versuch in range(3):
+        try:
+            with _patienten_db() as con:
+                con.execute("DELETE FROM patienten WHERE id=?", (row_id,))
+            break
+        except Exception as _ex:
+            if _versuch < 2:
+                import time as _t; _t.sleep(0.4)
+            else:
+                raise
     try:
         from database.turso_sync import push_delete
         push_delete(_PATIENTEN_DB_PFAD, "patienten", row_id)
@@ -559,6 +604,31 @@ def einsatz_aktualisieren(row_id: int, daten: dict) -> None:
 
 
 def einsatz_loeschen(row_id: int) -> None:
+    # Sanmat-Verbrauch prüfen: entweder löschen oder als Quelle-gelöscht markieren
+    if _SanmatDB is not None:
+        import time as _time_mod
+        for _versuch in range(3):
+            try:
+                _sanmat = _SanmatDB()
+                _sanmat.initialize()
+                stichwort = f"Einsatz-ID {row_id}"
+                with _db() as _con:
+                    _row = _con.execute(
+                        "SELECT einsatzstichwort FROM einsaetze WHERE id=?", (row_id,)
+                    ).fetchone()
+                    if _row:
+                        stichwort = _row["einsatzstichwort"] or stichwort
+                _sanmat.handle_quelle_geloescht(
+                    referenz_id=str(row_id),
+                    typ="ID",
+                    quelle_label=f"Einsatz: {stichwort}",
+                )
+                break  # Erfolg
+            except Exception as _ex:
+                if _versuch < 2:
+                    _time_mod.sleep(0.4)
+                else:
+                    print(f"[Sanmat] einsatz_loeschen {row_id}: Markierung fehlgeschlagen: {_ex}")
     with _db() as con:
         con.execute("DELETE FROM einsaetze WHERE id=?", (row_id,))
     try:
@@ -2943,6 +3013,10 @@ class _PatientenTab(QWidget):
                         patient_typ = daten.get("patient_typ", "Patient")
                         name = daten.get("patient_name") or patient_typ or f"Patient {patient_id}"
                         stichwort = f"Pat.-Station [{patient_typ}]: {name}  (GID {gid})"
+                        # GID im Patientendatensatz speichern für spätere Rückverfolgung
+                        with _patienten_db() as _pc:
+                            _pc.execute("UPDATE patienten SET sanmat_gid=? WHERE id=?",
+                                        (gid, patient_id))
                         fehler = []
                         for pos in verbrauch_mit_id:
                             ok, msg = db.entnehmen(
@@ -2999,47 +3073,7 @@ class _PatientenTab(QWidget):
         )
         if antwort != QMessageBox.StandardButton.Yes:
             return
-        # Prüfen ob Sanmat-Material zum Zurückbuchen vorhanden
-        rueck_auswahl = []
         try:
-            vm_liste = lade_verbrauchsmaterial(eintrag["id"])
-            rueck_mit_id = [m for m in vm_liste if m.get("artikel_id")]
-            if rueck_mit_id and _SanmatDB is not None:
-                artikel_dlg = _RueckbuchungsDialog(
-                    artikel=[{"name": m["material"], "menge": m["menge"],
-                               "artikel_id": m["artikel_id"]} for m in rueck_mit_id],
-                    titel="Material zurückbuchen?",
-                    parent=self,
-                )
-                if artikel_dlg.exec() == QDialog.DialogCode.Accepted:
-                    rueck_auswahl = artikel_dlg.get_auswahl()
-        except Exception:
-            pass
-        try:
-            if rueck_auswahl:
-                try:
-                    db = _SanmatDB()
-                    db.initialize()
-                    datum_raw = eintrag.get("datum", "")
-                    try:
-                        t = datum_raw.split(".")
-                        datum_iso = f"{t[2]}-{t[1]}-{t[0]}" if len(t) == 3 else datum_raw
-                    except Exception:
-                        datum_iso = datum_raw
-                    entnehmer = eintrag.get("drk_ma1", "")
-                    bem = f"Rückbuchung gelöschter Pat.: {name}"
-                    for pos in rueck_auswahl:
-                        db.einlagern(
-                            artikel_id=pos["artikel_id"],
-                            artikel_name=pos["name"],
-                            menge=pos["menge"],
-                            datum=datum_iso,
-                            von=entnehmer,
-                            bemerkung=bem,
-                            typ="rueckgabe",
-                        )
-                except Exception:
-                    pass
             patient_loeschen(eintrag["id"])
             self.refresh()
             QMessageBox.information(self, "Gelöscht", "Patient wurde gelöscht.")
@@ -3557,50 +3591,7 @@ class _EinsaetzeTab(QWidget):
         )
         if antwort != QMessageBox.StandardButton.Yes:
             return
-        # Prüfen ob Sanmat-Buchungen zum Zurückbuchen vorhanden
-        rueck_auswahl = []
-        db_ein = None
         try:
-            if _SanmatDB is not None:
-                import re as _re
-                db_ein = _SanmatDB()
-                db_ein.initialize()
-                alle = db_ein.get_buchungen(suche=f"(ID {e['id']})", typ="verbrauch", limit=500)
-                ziel_pattern = _re.compile(rf"\(ID {e['id']}\)")
-                sanmat_buchungen = [b for b in alle if ziel_pattern.search(b.get("bemerkung", ""))]
-                if sanmat_buchungen:
-                    artikel_dlg = _RueckbuchungsDialog(
-                        artikel=[{"name": b["artikel_name"], "menge": abs(b["menge"]),
-                                   "artikel_id": b["artikel_id"]} for b in sanmat_buchungen],
-                        titel="Material zurückbuchen?",
-                        parent=self,
-                    )
-                    if artikel_dlg.exec() == QDialog.DialogCode.Accepted:
-                        rueck_auswahl = artikel_dlg.get_auswahl()
-        except Exception:
-            pass
-        try:
-            if rueck_auswahl and db_ein is not None:
-                try:
-                    datum_raw = e.get("datum", "")
-                    try:
-                        t = datum_raw.split(".")
-                        datum_iso = f"{t[2]}-{t[1]}-{t[0]}" if len(t) == 3 else datum_raw
-                    except Exception:
-                        datum_iso = datum_raw
-                    stichwort = e.get("einsatzstichwort", "") or f"Einsatz-ID {e['id']}"
-                    for pos in rueck_auswahl:
-                        db_ein.einlagern(
-                            artikel_id=pos["artikel_id"],
-                            artikel_name=pos["name"],
-                            menge=pos["menge"],
-                            datum=datum_iso,
-                            von=e.get("drk_ma1", ""),
-                            bemerkung=f"Rückbuchung gelöschter Einsatz: {stichwort}  (ID {e['id']})",
-                            typ="rueckgabe",
-                        )
-                except Exception:
-                    pass
             einsatz_loeschen(e["id"])
             self.refresh()
         except Exception as exc:

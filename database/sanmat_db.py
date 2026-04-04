@@ -551,6 +551,100 @@ class SanmatDB:
         finally:
             conn.close()
 
+    def get_buchungen_fuer_referenz(self, referenz_id: str, typ: str = "ID") -> list[dict]:
+        """Gibt alle Buchungen zurück, deren bemerkung '(ID {referenz_id})' oder
+        '(GID {referenz_id})' enthält."""
+        pattern = f"({typ} {referenz_id})"
+        conn = self._conn()
+        try:
+            cur = conn.execute(
+                "SELECT id, artikel_id, artikel_name, menge, typ, von, bemerkung, datum "
+                "FROM buchungen WHERE bemerkung LIKE ?",
+                (f"%{pattern}%",)
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def get_buchungen_fuer_textmuster(self, textmuster: str) -> list[dict]:
+        """Fallback-Suche wenn keine GID bekannt: sucht per LIKE-Pattern in bemerkung.
+        Verwendet für ältere Patienten-Datensätze ohne sanmat_gid."""
+        conn = self._conn()
+        try:
+            cur = conn.execute(
+                "SELECT id, artikel_id, artikel_name, menge, typ, von, bemerkung, datum "
+                "FROM buchungen WHERE bemerkung LIKE ?",
+                (f"%{textmuster}%",)
+            )
+            return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def _handle_buchungen_geloescht(self, buchungen: list[dict],
+                                    quelle_label: str) -> tuple[str, int, int]:
+        """Kern-Logik für handle_quelle_geloescht: arbeitet auf vorgeladener Liste."""
+        if not buchungen:
+            return ("leer", 0, 0)
+
+        netto: dict[int, int] = {}
+        for b in buchungen:
+            aid = b["artikel_id"] or 0
+            netto[aid] = netto.get(aid, 0) + b["menge"]
+
+        alles_zurueck = all(v == 0 for v in netto.values())
+
+        if alles_zurueck:
+            conn = self._conn()
+            try:
+                anzahl = 0
+                for b in buchungen:
+                    if b["menge"] < 0:
+                        conn.execute("DELETE FROM buchungen WHERE id=?", (b["id"],))
+                        anzahl += 1
+                conn.commit()
+            finally:
+                conn.close()
+            return ("geloescht", anzahl, len(netto))
+        else:
+            hinweis = f"  ⚠ QUELLE GELÖSCHT [{quelle_label}]"
+            conn = self._conn()
+            try:
+                for b in buchungen:
+                    if "QUELLE GELÖSCHT" not in (b["bemerkung"] or ""):
+                        conn.execute(
+                            "UPDATE buchungen SET bemerkung = bemerkung || ? WHERE id = ?",
+                            (hinweis, b["id"])
+                        )
+                conn.commit()
+            finally:
+                conn.close()
+            verbraucht_anzahl = sum(1 for v in netto.values() if v != 0)
+            return ("markiert", len(buchungen), verbraucht_anzahl)
+
+    def handle_quelle_geloescht(self, referenz_id: str, typ: str = "ID",
+                                 quelle_label: str = "") -> tuple[str, int, int]:
+        """Wird aufgerufen wenn ein Einsatz oder Patient gelöscht wird.
+
+        - Alle Buchungen dieser Referenz werden gesucht.
+        - Wenn Netto-Verbrauch aller Artikel == 0 (alles zurückgebucht):
+          → Verbrauch-Buchungen löschen → gibt ('geloescht', n, m)
+        - Sonst: Hinweis '⚠ QUELLE GELÖSCHT' an bemerkung anhängen:
+          → gibt ('markiert', n, m)
+        - Keine Buchungen gefunden: gibt ('leer', 0, 0)
+        """
+        buchungen = self.get_buchungen_fuer_referenz(referenz_id, typ)
+        label = quelle_label or f"{typ} {referenz_id}"
+        return self._handle_buchungen_geloescht(buchungen, label)
+
+    def handle_quelle_geloescht_textmuster(self, textmuster: str,
+                                            quelle_label: str = "") -> tuple[str, int, int]:
+        """Fallback für ältere Datensätze ohne GID-Verknüpfung.
+        Sucht Buchungen per Text-LIKE und wendet dieselbe Lösch-/Markier-Logik an.
+        """
+        buchungen = self.get_buchungen_fuer_textmuster(textmuster)
+        label = quelle_label or textmuster
+        return self._handle_buchungen_geloescht(buchungen, label)
+
     def restore_buchung(self, snapshot: dict) -> tuple[bool, str]:
         """Stellt eine gelöschte Buchung aus einem Snapshot wieder her."""
         conn = self._conn()
