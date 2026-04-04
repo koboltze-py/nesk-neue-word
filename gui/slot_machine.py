@@ -1,10 +1,10 @@
 """
-gui/slot_machine.py  –  🎩 Alice im Wunderland — Wunderrad  v3
+gui/slot_machine.py  –  🎩 Alice im Wunderland — Wunderrad  v3.1
 5 Reels · 3 Reihen · 243 Ways · Wild
 • Einsatzstufen  5 · 10 · 20 · 50 · 100 Credits
 • 3 Sammelpods   🔴 Herzkönigin · 🔵 Wunderland · ⭐ Goldschatz
 • Bonusbälle     landen per Zufall – füllen Pods  
-• Holding Spin   6 Bälle in einem Spin → 3 Respins (Konami-Style)
+• Holding Spin   5+ Bälle → 5 Respins (Reset bei neuem Ball)
 • Free Games     3× Alice → 10 FS · 2× · Sticky Wilds
 • Pod-Boni       Herzkönigin-Karten · Wunderland-FS · Goldschatz-Jackpot
 """
@@ -62,13 +62,13 @@ POD_EMOJIS = ["🔴", "🔵", "⭐"]
 POD_COLS   = ["#c62828", "#1565c0", "#f9a825"]
 POD_TXT    = ["#ef9a9a", "#90caf9", "#ffe082"]
 
-# Ball-Werte (Multiplikator × Bet/10)
+# Ball-Werte (Multiplikator × Bet/10) – stark auf niedrige Werte gewichtet
 _BV_MUL  = [1,  2,  3,  5,  8, 15, 25, 50]
-_BV_WGT  = [35, 22, 16, 12,  8,  4,  2,  1]
+_BV_WGT  = [52, 26, 12,  6,  3,  2,  1,  1]
 
 # Holding Spin
-_HOLD_TRIGGER = 6
-_HOLD_RESPINS = 3
+_HOLD_TRIGGER = 5
+_HOLD_RESPINS = 5
 
 # Free Games
 _FS_BASE    = 10
@@ -93,7 +93,7 @@ def _ball_val(bet: int) -> int:
 
 
 def _ball_prob(bet_idx: int) -> float:
-    return 0.08 + bet_idx * 0.012
+    return 0.04 + bet_idx * 0.006
 
 
 def _spin_col(bet_idx: int, extra_ball: float = 0.0) -> list[int]:
@@ -222,6 +222,107 @@ class _PodWidget(QWidget):
                 dk.setAlpha(30)
                 p.setBrush(QBrush(dk))
             p.drawEllipse(QPointF(cx2, cy2), dot_r, dot_r)
+        p.end()
+
+
+# ── _WinOverlay ───────────────────────────────────────────────────────────────
+class _WinOverlay(QWidget):
+    """Animiertes Bonus-Win-Banner — erscheint zentriert über dem Dialog."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(parent.width(), parent.height())
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._text:  str    = ""
+        self._color: QColor = QColor("#c9a227")
+        self._alpha: float  = 0.0
+        self._ring:  float  = 0.0
+        self._phase: str    = "out"
+        self._hld:   int    = 0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._step)
+        self.hide()
+
+    def show_anim(self, text: str, color: str = "#c9a227") -> None:
+        self._text  = text
+        self._color = QColor(color)
+        self._alpha = 0.0
+        self._ring  = 0.0
+        self._phase = "in"
+        self._hld   = 0
+        self.raise_()
+        self.show()
+        if not self._timer.isActive():
+            self._timer.start(22)
+
+    def _step(self) -> None:
+        if self._phase == "in":
+            self._alpha = min(1.0, self._alpha + 0.08)
+            self._ring  = min(1.0, self._ring  + 0.05)
+            if self._alpha >= 1.0:
+                self._phase = "hold"
+        elif self._phase == "hold":
+            self._ring = (self._ring + 0.025) % 1.0
+            self._hld += 1
+            if self._hld >= 90:
+                self._phase = "out"
+        elif self._phase == "out":
+            self._alpha = max(0.0, self._alpha - 0.06)
+            if self._alpha <= 0.0:
+                self._timer.stop()
+                self.hide()
+        self.update()
+
+    def paintEvent(self, _) -> None:
+        if self._alpha <= 0.0:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H  = self.width(), self.height()
+        cx    = W / 2.0
+        cy    = H * 0.42
+        bw    = W - 80
+        bh    = 86
+
+        # Hintergrund
+        p.setOpacity(self._alpha * 0.88)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(4, 0, 18, 245)))
+        p.drawRoundedRect(QRectF(cx - bw / 2, cy - bh / 2, bw, bh), 16, 16)
+
+        # Leuchtender Rand
+        c_pen = QColor(self._color)
+        c_pen.setAlpha(int(self._alpha * 210))
+        p.setPen(QPen(c_pen, 2.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(cx - bw / 2, cy - bh / 2, bw, bh), 16, 16)
+
+        # Expandier-Ring
+        ring_r    = 30 + self._ring * 230
+        c_ring    = QColor(self._color)
+        ring_fade = max(0.0, 1.0 - self._ring) * self._alpha
+        c_ring.setAlpha(int(ring_fade * 110))
+        p.setPen(QPen(c_ring, max(1.0, 4.5 * (1.0 - self._ring))))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+
+        # Zweiter, versetzter Ring
+        ring_r2   = 30 + ((self._ring + 0.4) % 1.0) * 230
+        ring_fade2 = max(0.0, 1.0 - (self._ring + 0.4) % 1.0) * self._alpha * 0.6
+        c_ring.setAlpha(int(ring_fade2 * 90))
+        p.setPen(QPen(c_ring, max(1.0, 3.0 * (1.0 - (self._ring + 0.4) % 1.0))))
+        p.drawEllipse(QPointF(cx, cy), ring_r2, ring_r2)
+
+        # Text (Schatten + Hauptfarbe)
+        p.setOpacity(self._alpha)
+        f = QFont("Segoe UI", 17, QFont.Weight.Bold)
+        p.setFont(f)
+        p.setPen(QPen(QColor(0, 0, 0, 170)))
+        p.drawText(QRectF(cx - bw / 2 + 2, cy - bh / 2 + 2, bw, bh),
+                   Qt.AlignmentFlag.AlignCenter, self._text)
+        p.setPen(QPen(self._color))
+        p.drawText(QRectF(cx - bw / 2, cy - bh / 2, bw, bh),
+                   Qt.AlignmentFlag.AlignCenter, self._text)
         p.end()
 
 
@@ -452,6 +553,7 @@ class SlotMachineDialog(QDialog):
         self._reels:      list[_Reel]    = []
         self._pods_ui:    list[_PodWidget] = []
         self._stop_timers: list[QTimer]  = []
+        self._overlay: _WinOverlay | None = None
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
@@ -682,7 +784,7 @@ class SlotMachineDialog(QDialog):
                 row.addWidget(lb)
             iv.addLayout(row)
         note = QLabel(
-            "🔴🔵⭐ Bonusbälle → Pods  ·  6 Bälle/Spin → Holding Spin  ·  "
+            "🔴🔵⭐ Bonusbälle → Pods  ·  5+ Bälle → Holding Spin (5 Respins)  ·  "
             "3×👸 → 10 Free Games  ·  Pods voll → Bonus"
         )
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -698,6 +800,9 @@ class SlotMachineDialog(QDialog):
             "color:#4a235a80; font:italic 8px 'Segoe UI'; background:transparent;"
         )
         lay.addWidget(foot)
+
+        # Overlay (immer ganz oben, keine Mausinteraktion)
+        self._overlay = _WinOverlay(self)
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
     def _update_credits(self) -> None:
@@ -732,6 +837,11 @@ class SlotMachineDialog(QDialog):
                and not self._hold_reels
                and self._credits >= BET_LEVELS[self._bet_idx])
         self._spin_btn.setEnabled(can)
+
+    def _show_win_anim(self, text: str, color: str = "#c9a227") -> None:
+        """Zeigt das animierte Bonus-Banner."""
+        if self._overlay:
+            self._overlay.show_anim(text, color)
 
     def _grid(self) -> list[list[int]]:
         return [r.visible_symbols() for r in self._reels]
@@ -841,6 +951,9 @@ class SlotMachineDialog(QDialog):
             if len(wins) > 3:
                 msg += f"  (+{len(wins)-3})"
             self._res_lbl.setText(f"🎊  {msg}")
+            # Großer Gewinn-Flash ab 5× Einsatz
+            if total >= BET_LEVELS[self._bet_idx] * 5:
+                self._show_win_anim(f"🎊 +{total} CREDITS!", "#c9a227")
         else:
             self._res_lbl.setText("😿  Kein Treffer.")
         self._update_credits()
@@ -877,6 +990,10 @@ class SlotMachineDialog(QDialog):
 
         ball_count = sum(len(v) for v in ball_data.values())
         total_val  = sum(val for cells in ball_data.values() for _, val in cells)
+        self._show_win_anim(
+            f"🔮  HOLDING SPIN!  {ball_count} Bälle",
+            "#7e57c2"
+        )
         self._mode_lbl.setText(
             f"🔮  HOLDING SPIN!  {ball_count} Bälle  ·  Wert: +{total_val}  ·  {_HOLD_RESPINS} Respins"
         )
@@ -981,6 +1098,11 @@ class SlotMachineDialog(QDialog):
 
         self._res_lbl.setText(msg)
         self._update_credits()
+        # Bonus-Animation
+        if ball_cnt >= _REELS:
+            self._show_win_anim(f"🔥 MEGA HOLD! +{total_val}!", "#ff6b35")
+        elif total_val >= BET_LEVELS[self._bet_idx] * 3:
+            self._show_win_anim(f"🔮 HOLD +{total_val} Credits!", "#c9a227")
         self._mode = "idle"
         self._check_can_spin()
 
@@ -996,6 +1118,10 @@ class SlotMachineDialog(QDialog):
         self._mode_lbl.show()
         self._res_lbl.setText(
             f"👸  {alice_cnt}× Alice!  {self._fs_total} Free Games starten…"
+        )
+        self._show_win_anim(
+            f"👸  {self._fs_total} FREE GAMES!",
+            "#e91e63"
         )
         QTimer.singleShot(1800, self._run_freespin)
 
@@ -1086,6 +1212,7 @@ class SlotMachineDialog(QDialog):
         total = self._fs_total
         self._fs_total = 0
         self._res_lbl.setText(f"👸  Free Games beendet!  {total} Spins gespielt.")
+        self._show_win_anim(f"👸 FREE GAMES ENDE  {total} Spins", "#e91e63")
         self._mode = "idle"
         self._check_can_spin()
 
@@ -1105,6 +1232,7 @@ class SlotMachineDialog(QDialog):
             self._res_lbl.setText(
                 f"👑  Herzkönigin-Bonus!  Karten: {picks}  →  +{win} Credits!"
             )
+            self._show_win_anim(f"👑 +{win} Herzkönigin!", "#c62828")
 
         elif pod_idx == 1:
             # 🔵 Wunderland: Free Games
@@ -1125,6 +1253,7 @@ class SlotMachineDialog(QDialog):
                 self._mode_lbl.show()
                 QTimer.singleShot(1200, self._run_freespin)
             self._res_lbl.setText(f"🔵  Wunderland-Bonus!  +{bonus_fs} Free Games!")
+            self._show_win_anim(f"🔵 +{bonus_fs} FREE GAMES!", "#1565c0")
 
         elif pod_idx == 2:
             # ⭐ Goldschatz: Jackpot-Rad
@@ -1133,6 +1262,7 @@ class SlotMachineDialog(QDialog):
             win = random.choices(tiers, weights=weights, k=1)[0]
             self._credits += win
             self._res_lbl.setText(f"⭐  Goldschatz-Jackpot!  +{win} Credits!  🎡")
+            self._show_win_anim(f"⭐ JACKPOT! +{win} Credits!", "#f9a825")
 
         self._update_credits()
 
