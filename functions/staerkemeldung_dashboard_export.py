@@ -87,7 +87,7 @@ def _zeitgruppen(personen, ist_dispo=False):
         g.setdefault(key,[]).append(name)
     return g
 
-def _zeitgruppen_para(cell, gruppen, size=9.5):
+def _zeitgruppen_para(cell, gruppen, size=10):
     for zeit,namen in sorted(gruppen.items()):
         p=cell.add_paragraph(); pPr=p._p.get_or_add_pPr()
         tabs=OxmlElement("w:tabs"); tab=OxmlElement("w:tab")
@@ -102,7 +102,7 @@ def _zeitgruppen_para(cell, gruppen, size=9.5):
 def _bul_farben(n):
     if n<=2: return "FF3333","KRITISCH"
     if n==3: return "E07800","EINGESCHRAENKT"
-    return "10A050","VOLLSTAENDIG"
+    return "10A050","VOLLSTÄNDIG"
 
 
 class StaerkemeldungDashboardExport:
@@ -123,10 +123,18 @@ class StaerkemeldungDashboardExport:
         self._ausschl       ={n.lower().strip() for n in (ausgeschlossene_vollnamen or set())}
         self._bul_aktiv     =bulmor_aktiv
         self._stationslt    =stationsleitung
+        # Schichtleiter-Namen (Nachname allein oder "Vorname Nachname") als Ausschluss-Set
+        sl_namen = {n.lower().strip() for n in [sl_tag_name, sl_nacht_name] if n.strip()}
         kranke_ids=set(id(m) for m in dienstplan_data.get("kranke",[]))
+        def _ist_sl(m):
+            vn = m.get("vollname","").lower().strip()
+            nachname = vn.split(",")[0].strip() if "," in vn else vn.split()[-1].lower() if vn else ""
+            return vn in sl_namen or nachname in sl_namen
         self._dispo=sorted(
             [m for m in dienstplan_data.get("dispo",[])
-             if id(m) not in kranke_ids and m.get("vollname","").lower() not in self._ausschl],
+             if id(m) not in kranke_ids
+             and m.get("vollname","").lower() not in self._ausschl
+             and not _ist_sl(m)],
             key=lambda x: x.get("start_zeit") or "ZZZZ")
         self._betreuer=sorted(
             [m for m in dienstplan_data.get("betreuer",[])
@@ -234,21 +242,21 @@ class StaerkemeldungDashboardExport:
         self._build_rechts(rc)
 
     def _find_sl(self,nacht):
-        typen=_DISPO_NACHT_TYPEN if nacht else _DISPO_TAG_TYPEN
-        # Manuell eingegebener Name hat Vorrang
         manuell=self._sl_nacht_name if nacht else self._sl_tag_name
+        typen=_DISPO_NACHT_TYPEN if nacht else _DISPO_TAG_TYPEN
         for p in self._dispo:
             dk=(p.get("dienst_kategorie") or "").upper()
             if dk in typen:
-                name=manuell if manuell else (p.get("anzeigename") or p.get("vollname") or "-")
                 start=(p.get("start_zeit") or "")[:5]
                 end  =(p.get("end_zeit")   or "")[:5]
                 zeit =f"{start}-{end}" if (start and end) else "?-?"
-                return name,zeit
-        # Kein Eintrag im Dienstplan, aber Name wurde haendisch eingegeben
+                # Name nur ausgeben wenn manuell eingegeben, sonst leer lassen
+                return manuell, zeit
+        # Kein Dispo-Eintrag gefunden
         if manuell:
             return manuell, "?"
-        return None
+        # Kein Eintrag und kein Name → Zeile trotzdem zeigen, aber leer
+        return "", ""
 
     def _build_links(self,lc):
         _para(lc,"Deutsches Rotes Kreuz",bold=True,size=10.5,fg="000000",align="center",sb=2)
@@ -320,13 +328,13 @@ class StaerkemeldungDashboardExport:
         zeitraum=datum_str if datum_str==bis_str else f"{datum_str} bis {bis_str}"
         rz_lbl=pz.add_run("Zeitraum:\t"); rz_lbl.font.size=Pt(11); rz_lbl.font.bold=True; rz_lbl.font.name="Aptos"
         rz_val=pz.add_run(zeitraum); rz_val.font.size=Pt(11); rz_val.font.bold=False; rz_val.font.name="Aptos"
-        if sl_tag or sl_nacht:
+        if True:  # Schichtleiter-Block immer anzeigen
             ph_sl=rc.add_paragraph()
             ph_sl.paragraph_format.space_before=Pt(2); ph_sl.paragraph_format.space_after=Pt(1)
             rh_sl=ph_sl.add_run("Schichtleiter"); rh_sl.font.bold=True; rh_sl.font.size=Pt(11)
             rh_sl.font.name="Aptos"
             for sl in [sl_tag, sl_nacht]:
-                if not sl: continue
+                if sl is None: continue
                 p_sl=rc.add_paragraph(); pPr=p_sl._p.get_or_add_pPr()
                 tabs=OxmlElement("w:tabs"); tab=OxmlElement("w:tab")
                 tab.set(qn("w:val"),"left"); tab.set(qn("w:pos"),"2550")

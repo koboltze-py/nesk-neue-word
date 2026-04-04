@@ -6,7 +6,12 @@ Gefilterte Ansicht des Buchungsverlaufs (typ='verbrauch').
 from __future__ import annotations
 import csv
 import os
+from collections import defaultdict
 from datetime import date
+
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 import re
 
@@ -116,7 +121,7 @@ class VerbrauchView(QWidget):
 
         f_lay.addStretch()
 
-        btn_export = QPushButton("📄 CSV Export")
+        btn_export = QPushButton("📄 Excel Export")
         btn_export.clicked.connect(self._export_csv)
         f_lay.addWidget(btn_export)
 
@@ -192,29 +197,25 @@ class VerbrauchView(QWidget):
             typ="verbrauch", datum_von=von_str, datum_bis=bis_str, suche=suche
         )
 
-        # Gruppen-Schlüssel je Zeile: "ID_43" (Einsatz) oder "GID_..." (manuell) oder None
+        # Gruppen-Schlüssel je Zeile: "ID_43" (Einsatz) oder "GID_..." (manuell/Pat.) oder None
         eid_of: list[str | None] = []
-        eid_count: dict[str, int] = {}
         for b in rows:
             m = re.search(r"\((G?ID)\s*(\d+)\)", b.get("bemerkung", "") or "")
             eid: str | None = f"{m.group(1)}_{m.group(2)}" if m else None
             eid_of.append(eid)
-            if eid is not None:
-                eid_count[eid] = eid_count.get(eid, 0) + 1
 
         # Anzeigeliste aufbauen: (kind, eid, buchung)
         # kind = 'header' | 'item' | 'flat'
         display: list[tuple] = []
         seen_eids: set[str] = set()
         for b, eid in zip(rows, eid_of):
-            multi = eid is not None and eid_count.get(eid, 0) > 1
-            if multi:
+            if eid is not None:
                 if eid not in seen_eids:
                     seen_eids.add(eid)
                     display.append(("header", eid, b))
                 display.append(("item", eid, b))
             else:
-                display.append(("flat", eid, b))
+                display.append(("flat", None, b))
 
         self._table.clearSpans()
         self._table.blockSignals(True)
@@ -233,8 +234,26 @@ class VerbrauchView(QWidget):
                 datum_fmt = datum_raw
 
             bemerkung_raw = b.get("bemerkung", "") or ""
-            einsatz_name  = re.sub(r"\s*\(G?ID\s*\d+\).*", "", bemerkung_raw).strip()
-            icon = "🚑" if (eid or "").startswith("ID_") else "📋"
+            # Header-Text: Einsatz → nur Stichwort, Pat.-Station → patient_typ aus []
+            bem_ohne_id = re.sub(r"\s*\(G?ID\s*\d+\).*", "", bemerkung_raw).strip()
+            if (eid or "").startswith("ID_"):
+                # "Einsatz: Intern 2" → "Intern 2"
+                einsatz_name = re.sub(r"^Einsatz:\s*", "", bem_ohne_id).strip()
+                icon = "🚑"
+                typ_tag = "Einsatz"
+            elif bem_ohne_id.startswith("Pat.-Station"):
+                # "Pat.-Station [Passagier]: Max Mustermann" → "Passagier"
+                m_typ = re.search(r"\[([^\]]+)\]", bem_ohne_id)
+                if m_typ:
+                    einsatz_name = m_typ.group(1).strip()
+                else:
+                    einsatz_name = re.sub(r"^Pat\.-Station[:\s]*", "", bem_ohne_id).strip()
+                icon = "🏥"
+                typ_tag = "Pat. Station"
+            else:
+                einsatz_name = bem_ohne_id
+                icon = "📋"
+                typ_tag = ""
 
             def _cell(text: str, bg: QColor, fg: QColor | None = None,
                       bold: bool = False, align=None) -> QTableWidgetItem:
@@ -253,7 +272,7 @@ class VerbrauchView(QWidget):
                 self._table.setItem(r, 0, _cell(datum_fmt, self._COL_HEADER_BG, self._COL_HEADER_FG, bold=True))
                 self._table.setItem(r, 1, _cell(f"{icon}  {einsatz_name}", self._COL_HEADER_BG, self._COL_HEADER_FG, bold=True))
                 self._table.setItem(r, 3, _cell(b.get("von", ""), self._COL_HEADER_BG, self._COL_HEADER_FG, bold=True))
-                self._table.setItem(r, 4, _cell("", self._COL_HEADER_BG, self._COL_HEADER_FG))
+                self._table.setItem(r, 4, _cell(typ_tag, self._COL_HEADER_BG, QColor("#b3d1ff"), bold=False))
                 self._table.setSpan(r, 1, 1, 2)  # Artikel + Menge-Spalte zusammenführen
                 self._table.setRowHeight(r, 26)
 
@@ -346,46 +365,175 @@ class VerbrauchView(QWidget):
                 return
 
         pfad, _ = QFileDialog.getSaveFileName(
-            self, "CSV speichern", f"sanmat_verbrauch_{date.today()}.csv", "CSV (*.csv)"
+            self, "Excel speichern", f"sanmat_verbrauch_{date.today()}.xlsx", "Excel (*.xlsx)"
         )
         if not pfad:
             return
+
         von_str = self._von.date().toString("yyyy-MM-dd")
         bis_str = self._bis.date().toString("yyyy-MM-dd")
         suche   = self._suche.text().strip() or None
         alle = self._db.get_buchungen(limit=99999, offset=0, typ="verbrauch",
                                       datum_von=von_str, datum_bis=bis_str, suche=suche)
+
+        # ── Daten nach Datum + Gruppe strukturieren ────────────────────────
+        nach_datum: dict[str, dict] = defaultdict(dict)
+        for b in alle:
+            bid = b.get("id")
+            bem = b.get("bemerkung", "") or ""
+            m = re.search(r"\((G?ID)\s*(\d+)\)", bem)
+            group_key = f"{m.group(1)}_{m.group(2)}" if m else f"flat_{bid}"
+            if bid in self._excluded_ids:
+                continue
+            if m and group_key in self._excluded_eids:
+                continue
+            datum_raw = b.get("datum", "")[:10]
+            try:
+                y, mo, d = datum_raw.split("-")
+                datum_fmt = f"{d}.{mo}.{y}"
+            except Exception:
+                datum_fmt = datum_raw
+            teile = bem.split("##")
+            stichwort = re.sub(r"\s*\(G?ID\s*\d+\)", "", teile[0]).strip()
+            notiz = teile[1].strip() if len(teile) > 1 else ""
+            if datum_fmt not in nach_datum:
+                nach_datum[datum_fmt] = {}
+            if group_key not in nach_datum[datum_fmt]:
+                nach_datum[datum_fmt][group_key] = {
+                    "stichwort": stichwort,
+                    "entnehmer": b.get("von", "") or "",
+                    "artikel": [],
+                }
+            nach_datum[datum_fmt][group_key]["artikel"].append((
+                b.get("artikel_name", ""),
+                abs(b.get("menge", 0)),
+                notiz,
+            ))
+
+        # ── Hilfsfunktionen ────────────────────────────────────────────────
+        def _bg(color: str) -> PatternFill:
+            return PatternFill("solid", fgColor=color)
+
+        def _border() -> Border:
+            s = Side(style="thin", color="00CCCCCC")
+            return Border(left=s, right=s, top=s, bottom=s)
+
+        CLR_FG = "00FFFFFF"
+
+        # ── Workbook aufbauen ──────────────────────────────────────────────
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Verbrauch"
+
+        # Titelzeile
+        ws.merge_cells("A1:F1")
+        c = ws["A1"]
+        c.value = "Sanitätsmaterial-Verbrauchsprotokoll – DRK Erste-Hilfe-Station FKB"
+        c.font = Font(bold=True, size=14, color=CLR_FG)
+        c.fill = _bg("00334155")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 28
+
+        # Zeitraum-Zeile
+        ws.merge_cells("A2:F2")
+        c = ws["A2"]
+        von_zeige = self._von.date().toString("dd.MM.yyyy")
+        bis_zeige = self._bis.date().toString("dd.MM.yyyy")
+        c.value = (f"Exportiert am: {date.today().strftime('%d.%m.%Y')}"
+                   f"   |   Zeitraum: {von_zeige} – {bis_zeige}")
+        c.font = Font(italic=True, size=10, color="00666666")
+        c.fill = _bg("00F5F5F5")
+        c.alignment = Alignment(horizontal="right")
+
+        # Spalten-Header
+        for col, h in enumerate(["Datum", "Einsatz / Grund", "Artikel", "Menge", "Entnehmer", "Notiz"], 1):
+            c = ws.cell(row=3, column=col, value=h)
+            c.font = Font(bold=True, color=CLR_FG)
+            c.fill = _bg("001565A8")
+            c.alignment = Alignment(horizontal="center")
+            c.border = _border()
+        ws.row_dimensions[3].height = 20
+
+        # ── Datenzeilen ────────────────────────────────────────────────────
+        artikel_gesamt: dict[str, int] = defaultdict(int)
+        r = 4
+        date_colors = ["00F5F5F5", "00FAFAFA"]
         exportiert = 0
-        try:
-            with open(pfad, "w", newline="", encoding="utf-8-sig") as f:
-                w = csv.writer(f, delimiter=";")
-                w.writerow(self._HDR)
-                for b in alle:
-                    bid = b.get("id")
-                    bem = b.get("bemerkung", "") or ""
-                    m = re.search(r"\((G?ID)\s*(\d+)\)", bem)
-                    group_key = f"{m.group(1)}_{m.group(2)}" if m else None
-                    # Ausgeschlossene überspringen
-                    if bid in self._excluded_ids:
-                        continue
-                    if group_key is not None and group_key in self._excluded_eids:
-                        continue
-                    datum_raw = b.get("datum", "")[:10]
-                    try:
-                        y, mo, d = datum_raw.split("-")
-                        datum_fmt = f"{d}.{mo}.{y}"
-                    except Exception:
-                        datum_fmt = datum_raw
-                    bemerkung_clean = re.sub(r"\s*\(G?ID\s*\d+\)", "", bem).strip()
-                    w.writerow([
-                        datum_fmt,
-                        b.get("artikel_name", ""),
-                        abs(b.get("menge", 0)),
-                        b.get("von", ""),
-                        bemerkung_clean,
-                    ])
+
+        for di, datum in enumerate(sorted(nach_datum.keys(),
+                                          key=lambda d: tuple(reversed(d.split("."))))):  # noqa: E501
+            gruppen = nach_datum[datum]
+            # Datums-Trennzeile
+            ws.merge_cells(f"A{r}:F{r}")
+            c = ws.cell(row=r, column=1, value=f"  {datum}")
+            c.font = Font(bold=True, size=11, color=CLR_FG)
+            c.fill = _bg("00546E7A")
+            c.border = _border()
+            ws.row_dimensions[r].height = 18
+            r += 1
+
+            item_bg = date_colors[di % len(date_colors)]
+            for gruppe in gruppen.values():
+                for i, (art, menge, notiz) in enumerate(gruppe["artikel"]):
+                    ws.cell(row=r, column=1, value=datum if i == 0 else "").fill = _bg(item_bg)
+                    ws.cell(row=r, column=2, value=gruppe["stichwort"] if i == 0 else "").fill = _bg(item_bg)
+                    ws.cell(row=r, column=3, value=art).fill = _bg(item_bg)
+                    c_m = ws.cell(row=r, column=4, value=menge)
+                    c_m.font = Font(bold=True, color="00263238")
+                    c_m.alignment = Alignment(horizontal="center")
+                    c_m.fill = _bg(item_bg)
+                    ws.cell(row=r, column=5, value=gruppe["entnehmer"] if i == 0 else "").fill = _bg(item_bg)
+                    ws.cell(row=r, column=6, value=notiz).fill = _bg(item_bg)
+                    for col in range(1, 7):
+                        ws.cell(row=r, column=col).border = _border()
+                    artikel_gesamt[art] += menge
                     exportiert += 1
-            QMessageBox.information(self, "Export", f"CSV gespeichert ({exportiert} Zeilen):\n{pfad}")
+                    r += 1
+            r += 1  # Leerzeile
+
+        # ── Gesamtübersicht ────────────────────────────────────────────────
+        r += 1
+        ws.merge_cells(f"A{r}:F{r}")
+        c = ws.cell(row=r, column=1, value="  Alle verbrauchten Artikel – Gesamtübersicht")
+        c.font = Font(bold=True, size=12, color=CLR_FG)
+        c.fill = _bg("00455A64")
+        c.border = _border()
+        ws.row_dimensions[r].height = 20
+        r += 1
+
+        for col, h in enumerate(["Artikel", "", "", "Verbraucht", "Einheit", ""], 1):
+            c = ws.cell(row=r, column=col, value=h)
+            c.font = Font(bold=True, color=CLR_FG)
+            c.fill = _bg("00607D8B")
+            c.border = _border()
+        r += 1
+
+        for i, (art, menge) in enumerate(sorted(artikel_gesamt.items(), key=lambda x: x[0])):
+            bg = "00F5F5F5" if i % 2 == 0 else "00FFFFFF"
+            ws.cell(row=r, column=1, value=f"  {art}").fill = _bg(bg)
+            ws.cell(row=r, column=1).border = _border()
+            c_m = ws.cell(row=r, column=4, value=menge)
+            c_m.font = Font(bold=True)
+            c_m.alignment = Alignment(horizontal="center")
+            c_m.fill = _bg(bg)
+            c_m.border = _border()
+            ws.cell(row=r, column=5, value="Stück").fill = _bg(bg)
+            ws.cell(row=r, column=5).border = _border()
+            for col in [2, 3, 6]:
+                ws.cell(row=r, column=col).fill = _bg(bg)
+                ws.cell(row=r, column=col).border = _border()
+            r += 1
+
+        # ── Spaltenbreiten / Freeze ────────────────────────────────────────
+        for i, w in enumerate([12, 30, 42, 8, 15, 20], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.freeze_panes = "A4"
+        ws.sheet_view.showGridLines = False
+
+        try:
+            wb.save(pfad)
+            QMessageBox.information(self, "Export",
+                                     f"Excel gespeichert ({exportiert} Zeilen):\n{pfad}")
         except Exception as e:
             QMessageBox.warning(self, "Fehler", str(e))
 
@@ -702,7 +850,7 @@ class VerbrauchView(QWidget):
         lay.addWidget(QLabel("<b>📋  Verbrauchsgruppe anlegen</b>"))
         lay.addWidget(QLabel(
             "<span style='color:#666;font-size:11px;'>"
-            "Für Verbräuche außerhalb von Einsätzen (Übung, Ablauf, Eigenbedarf …)"
+            "Gruppenname frei definieren – z.B. 'Schicht 04.04.', 'Einsatz XY', 'Patient-Station' …"
             "</span>"
         ))
 
@@ -710,11 +858,12 @@ class VerbrauchView(QWidget):
         form_top = QFormLayout()
         form_top.setSpacing(8)
         le_stichwort = QLineEdit()
-        le_stichwort.setPlaceholderText("z.B. Übung 02.04.2026, MHD-Abgang April …")
-        form_top.addRow("Bezeichnung:", le_stichwort)
+        le_stichwort.setPlaceholderText("z.B. Schicht 04.04.2026, Einsatz Inland 1, MHD-Abgang April …")
+        form_top.addRow("Gruppenname *:", le_stichwort)
         cb_grund = QComboBox()
+        cb_grund.addItem("(kein Grund)")
         cb_grund.addItems(self.GRUENDE)
-        form_top.addRow("Grund:", cb_grund)
+        form_top.addRow("Grund (optional):", cb_grund)
         le_entnehmer = QLineEdit()
         le_entnehmer.setPlaceholderText("Name …")
         form_top.addRow("Entnehmer:", le_entnehmer)
@@ -851,8 +1000,15 @@ class VerbrauchView(QWidget):
                                     "Bitte mindestens einen Artikel in den Warenkorb legen.")
                 return
             bezeichnung = le_stichwort.text().strip()
+            if not bezeichnung:
+                QMessageBox.warning(dlg, "Gruppenname fehlt",
+                                    "Bitte einen Gruppenname / Oberbegriff eingeben.")
+                return
             grund = cb_grund.currentText()
-            stichwort = f"{grund}: {bezeichnung}" if bezeichnung else grund
+            if grund == "(kein Grund)":
+                stichwort = bezeichnung
+            else:
+                stichwort = f"{bezeichnung}  [{grund}]"
             entnehmer = le_entnehmer.text().strip()
             datum_iso = de_datum.date().toString("yyyy-MM-dd")
             ok, msg = self._db.buche_verbrauch_gruppe(

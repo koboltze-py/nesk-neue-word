@@ -43,9 +43,12 @@ class _NeskLogoWidget(QWidget):
         super().__init__(parent)
         self._t0 = time.monotonic()
         self.setFixedSize(self.W, self.H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Doppelklick für 🎩 Alice's Wunderrad")
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(30)  # ~33 FPS
+        self._slot_dlg = None
 
     def paintEvent(self, event):
         t  = time.monotonic() - self._t0
@@ -139,6 +142,24 @@ class _NeskLogoWidget(QWidget):
         p.drawText(QPointF(cx - sw / 2, ty + 17), sub)
 
         p.end()
+
+    def mouseDoubleClickEvent(self, event):
+        from gui.slot_machine import SlotMachineDialog
+        if self._slot_dlg is None or not self._slot_dlg.isVisible():
+            self._slot_dlg = SlotMachineDialog()
+            # Fenster zentriert über dem Haupt-Fenster positionieren
+            mw = self.window()
+            if mw:
+                center = mw.geometry().center()
+                self._slot_dlg.move(
+                    center.x() - self._slot_dlg.width() // 2,
+                    center.y() - self._slot_dlg.height() // 2,
+                )
+            self._slot_dlg.show()
+        else:
+            self._slot_dlg.raise_()
+            self._slot_dlg.activateWindow()
+
 from gui.dashboard        import DashboardWidget
 from gui.aufgaben_haupt   import AufgabenHauptWidget
 from gui.dienstplan       import DienstplanWidget
@@ -153,7 +174,6 @@ from gui.telefonnummern         import TelefonnummernWidget
 from gui.call_transcription     import CallTranscriptionWidget
 from gui.backup_widget          import BackupWidget
 from gui.passagiere             import PassagiereWidget
-from gui.sanmat.main_widget     import SanmatWidget
 
 
 NAV_ITEMS = [
@@ -170,7 +190,6 @@ NAV_ITEMS = [
     ("♿", "Call Transcription",  10),
     ("💾", "Backup",             11),
     ("⚙️",  "Einstellungen",    12),
-    ("🩺", "Sanitätsmaterial",  13),
 ]
 
 NAV_TOOLTIPS = [
@@ -187,7 +206,6 @@ NAV_TOOLTIPS = [
     "Anrufprotokoll: Anrufinhalte mit Textbausteinen schnell erfassen und verwalten",
     "Datensicherung erstellen und wiederherstellen",
     "App-Einstellungen, Pfade und E-Mobby-Fahrerliste",
-    "Sanitätsmaterial verwalten: Artikel, Bestand, Entnahme und Buchungsverlauf",
 ]
 
 
@@ -379,8 +397,6 @@ class MainWindow(QMainWindow):
         self._backup_page            = BackupWidget()
         self._settings_page          = EinstellungenWidget()
         self._passagiere_page        = PassagiereWidget()
-        self._sanmat_page            = SanmatWidget()
-
         for page in [self._dashboard_page, self._mitarbeiter_page,
                      self._dienstliches_page,
                      self._aufgaben_haupt_page,
@@ -389,8 +405,7 @@ class MainWindow(QMainWindow):
                      self._passagiere_page,
                      self._telefonnummern_page,
                      self._call_transcription_page,
-                     self._backup_page, self._settings_page,
-                     self._sanmat_page]:
+                     self._backup_page, self._settings_page]:
             self._stack.addWidget(page)
 
         layout.addWidget(self._stack)

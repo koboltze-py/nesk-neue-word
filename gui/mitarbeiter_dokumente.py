@@ -2207,11 +2207,8 @@ class MitarbeiterDokumenteWidget(QWidget):
             except Exception as exc:
                 QMessageBox.warning(self, "Fehler", str(exc))
         else:
-            QMessageBox.warning(
-                self, "Datei nicht gefunden",
-                f"Das Dokument wurde nicht gefunden:\n{pfad}\n\n"
-                "Es wurde möglicherweise verschoben oder gelöscht."
-            )
+            # Kein Dokument oder Datei fehlt → Bearbeiten-Dialog zum Neu-Erstellen
+            self._verspaetung_bearbeiten()
 
     def _verspaetung_ordner_oeffnen(self):
         from functions.verspaetung_functions import PROTOKOLL_DIR
