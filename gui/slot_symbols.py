@@ -600,6 +600,78 @@ def _draw_rose(p: QPainter, cx: float, cy: float, s: float) -> None:
 
 
 # ── Dispatch-Tabelle ──────────────────────────────────────────────────────────
+def _draw_ball_red(p: QPainter, cx: float, cy: float, s: float) -> None:
+    """🔴 Bonusball Rot — leuchtend rote Kugel mit weißem Herz (Herzkönigin-Pod)."""
+    # Äußerer Glowring
+    grd = QRadialGradient(cx, cy, s * 0.78)
+    grd.setColorAt(0.0, QColor(255, 80, 80, 110))
+    grd.setColorAt(1.0, QColor(230, 30, 30, 0))
+    p.setBrush(QBrush(grd))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(cx, cy), s * 0.78, s * 0.78)
+    # Kugel
+    grad = QRadialGradient(cx - s * 0.22, cy - s * 0.26, s * 0.58)
+    grad.setColorAt(0.0, QColor("#ff6b6b"))
+    grad.setColorAt(0.55, QColor("#e53935"))
+    grad.setColorAt(1.0, QColor("#b71c1c"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(QPointF(cx, cy), s * 0.54, s * 0.54)
+    # Glanzpunkt
+    p.setBrush(QBrush(QColor(255, 255, 255, 75)))
+    p.drawEllipse(QPointF(cx - s * 0.18, cy - s * 0.22), s * 0.24, s * 0.15)
+    # Herz
+    _solid(p, "#fafafa")
+    p.drawPath(_heart(cx, cy + s * 0.05, s * 0.22))
+
+
+def _draw_ball_blue(p: QPainter, cx: float, cy: float, s: float) -> None:
+    """🔵 Bonusball Blau — blaue Kugel mit weißem Kaninchen-Silhouette (Wunderland-Pod)."""
+    grd = QRadialGradient(cx, cy, s * 0.78)
+    grd.setColorAt(0.0, QColor(80, 160, 255, 110))
+    grd.setColorAt(1.0, QColor(30, 100, 230, 0))
+    p.setBrush(QBrush(grd))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(cx, cy), s * 0.78, s * 0.78)
+    # Kugel
+    grad = QRadialGradient(cx - s * 0.22, cy - s * 0.26, s * 0.58)
+    grad.setColorAt(0.0, QColor("#64b5f6"))
+    grad.setColorAt(0.55, QColor("#1976d2"))
+    grad.setColorAt(1.0, QColor("#0d47a1"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(QPointF(cx, cy), s * 0.54, s * 0.54)
+    # Glanzpunkt
+    p.setBrush(QBrush(QColor(255, 255, 255, 75)))
+    p.drawEllipse(QPointF(cx - s * 0.18, cy - s * 0.22), s * 0.24, s * 0.15)
+    # Kaninchen-Ohren (kleine weiße Ovale)
+    _solid(p, "#e3f2fd")
+    p.drawEllipse(QPointF(cx - s * 0.12, cy - s * 0.12), s * 0.09, s * 0.18)
+    p.drawEllipse(QPointF(cx + s * 0.12, cy - s * 0.12), s * 0.09, s * 0.18)
+    p.drawEllipse(QPointF(cx, cy + s * 0.1), s * 0.13, s * 0.1)
+
+
+def _draw_ball_gold(p: QPainter, cx: float, cy: float, s: float) -> None:
+    """⭐ Bonusball Gold — goldene Kugel mit schwarzem Stern (Goldschatz-Pod)."""
+    grd = QRadialGradient(cx, cy, s * 0.82)
+    grd.setColorAt(0.0, QColor(255, 220, 60, 130))
+    grd.setColorAt(1.0, QColor(220, 140, 0, 0))
+    p.setBrush(QBrush(grd))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(cx, cy), s * 0.82, s * 0.82)
+    # Kugel
+    grad = QRadialGradient(cx - s * 0.22, cy - s * 0.26, s * 0.58)
+    grad.setColorAt(0.0, QColor("#ffe082"))
+    grad.setColorAt(0.55, QColor("#f9a825"))
+    grad.setColorAt(1.0, QColor("#e65100"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(QPointF(cx, cy), s * 0.54, s * 0.54)
+    # Glanzpunkt
+    p.setBrush(QBrush(QColor(255, 255, 255, 90)))
+    p.drawEllipse(QPointF(cx - s * 0.18, cy - s * 0.22), s * 0.24, s * 0.15)
+    # Stern
+    _solid(p, "#1a1a2e")
+    p.drawPath(_star(cx, cy + s * 0.04, s * 0.3, s * 0.13, 5))
+
+
 _DRAW = [
     _draw_wild,     # 0  Wild
     _draw_alice,    # 1  Alice (Scatter)
@@ -612,6 +684,9 @@ _DRAW = [
     _draw_teapot,   # 8  Teapot
     _draw_key,      # 9  Key
     _draw_rose,     # 10 Red Rose
+    _draw_ball_red,  # 11 Bonusball ROT
+    _draw_ball_blue, # 12 Bonusball BLAU
+    _draw_ball_gold, # 13 Bonusball GOLD
 ]
 
 

@@ -1,12 +1,17 @@
 """
-gui/slot_machine.py  –  🎩 Alice im Wunderland — Glücksrad
-5 Reels · 3 Reihen · 243 Ways to Win (wie Buffalo) · Wild · Alice-Bonus
+gui/slot_machine.py  –  🎩 Alice im Wunderland — Wunderrad  v3
+5 Reels · 3 Reihen · 243 Ways · Wild
+• Einsatzstufen  5 · 10 · 20 · 50 · 100 Credits
+• 3 Sammelpods   🔴 Herzkönigin · 🔵 Wunderland · ⭐ Goldschatz
+• Bonusbälle     landen per Zufall – füllen Pods  
+• Holding Spin   6 Bälle in einem Spin → 3 Respins (Konami-Style)
+• Free Games     3× Alice → 10 FS · 2× · Sticky Wilds
+• Pod-Boni       Herzkönigin-Karten · Wunderland-FS · Goldschatz-Jackpot
 """
 from __future__ import annotations
 
 import math
 import random
-from itertools import product
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QTimer
 from PySide6.QtGui import (
@@ -18,92 +23,206 @@ from PySide6.QtWidgets import (
     QLabel, QWidget, QFrame,
 )
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Symbol-Tabelle
-#  Index  Emoji   Name              Farbe     Gewicht  win×3 win×4 win×5
-# ══════════════════════════════════════════════════════════════════════════════
-WILD_IDX  = 0   # Wild ersetzt alle außer Alice-Scatter und Wild selbst
-ALICE_IDX = 1   # Scatter → Bonus
+# ── Symbole ───────────────────────────────────────────────────────────────────
+WILD_IDX   = 0
+ALICE_IDX  = 1
+BALL_R_IDX = 11        # ROT  → Pod 0 (Herzkönigin)
+BALL_B_IDX = 12        # BLAU → Pod 1 (Wunderland)
+BALL_G_IDX = 13        # GOLD → Pod 2 (Goldschatz)
+IS_BALL:     frozenset[int] = frozenset({BALL_R_IDX, BALL_B_IDX, BALL_G_IDX})
+BALL_TO_POD: dict[int, int] = {BALL_R_IDX: 0, BALL_B_IDX: 1, BALL_G_IDX: 2}
 
+# (emoji, name, farbe, gewicht, win3, win4, win5)
 SYMBOLS: list[tuple] = [
-    # idx  emoji   name               farbe      wt  w3   w4    w5
-    ("🪄", "Wild",              "#ffffff",   4,  0,    0,  5000),  # 0 Wild
-    ("👸", "Alice (Scatter)",   "#fce4ec",   6, 400, 1000, 3000),  # 1 Scatter
+    ("🪄", "Wild",              "#ffffff",   4,  0,    0,  5000),  # 0
+    ("👸", "Alice (Scatter)",   "#fce4ec",   5, 400, 1000, 3000),  # 1
     ("🎩", "Hutmacher",         "#f9ca24",   9, 120,  320,  800),  # 2
     ("🐱", "Grinsekatze",       "#c39bd3",  11,  80,  220,  550),  # 3
-    ("🐰", "Weißes Kaninchen",  "#dfe6e9",  13,  55,  160,  380),  # 4
+    ("🐰", "Kaninchen",         "#dfe6e9",  13,  55,  160,  380),  # 4
     ("👑", "Herzkönigin",       "#e74c3c",  15,  40,  110,  250),  # 5
     ("⏰", "Taschenuhr",        "#fab1a0",  18,  28,   75,  160),  # 6
     ("🍄", "Wunderpilz",        "#55efc4",  21,  18,   50,  100),  # 7
     ("🫖", "Teekanne",          "#74b9ff",  24,  10,   30,   70),  # 8
     ("🔑", "Schlüssel",         "#fdcb6e",  28,   7,   20,   45),  # 9
     ("🌹", "Rote Rose",         "#fd79a8",  32,   4,   12,   30),  # 10
+    ("🔴", "Ball ROT",          "#ef5350",   0,   0,    0,    0),  # 11
+    ("🔵", "Ball BLAU",         "#1e88e5",   0,   0,    0,    0),  # 12
+    ("⭐", "Ball GOLD",         "#f9a825",   0,   0,    0,    0),  # 13
 ]
+_POOL = sum([[i] * SYMBOLS[i][3] for i in range(11)], [])   # Indices 0-10
 
-_POOL = sum([[i] * SYMBOLS[i][3] for i in range(len(SYMBOLS))], [])
-_COST        = 10
-_BONUS_SPINS = 5
-_BONUS_WINS  = {3: 300, 4: 1000, 5: 4000}
-_ROWS        = 3    # sichtbare Zeilen pro Reel
-_REELS       = 5
+# Einsatz
+BET_LEVELS   = [5, 10, 20, 50, 100]
+_DEF_BET_IDX = 1        # 10 Credits
+
+# Pods
+POD_CAP    = 10
+POD_NAMES  = ["Herzkönigin", "Wunderland", "Goldschatz"]
+POD_EMOJIS = ["🔴", "🔵", "⭐"]
+POD_COLS   = ["#c62828", "#1565c0", "#f9a825"]
+POD_TXT    = ["#ef9a9a", "#90caf9", "#ffe082"]
+
+# Ball-Werte (Multiplikator × Bet/10)
+_BV_MUL  = [1,  2,  3,  5,  8, 15, 25, 50]
+_BV_WGT  = [35, 22, 16, 12,  8,  4,  2,  1]
+
+# Holding Spin
+_HOLD_TRIGGER = 6
+_HOLD_RESPINS = 3
+
+# Free Games
+_FS_BASE    = 10
+_FS_RETRIG  = 5
+_FS_MULT    = 2
+
+_ROWS  = 3
+_REELS = 5
 
 
 def _rnd() -> int:
     return random.choice(_POOL)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  243-Ways Auswertung
-# ══════════════════════════════════════════════════════════════════════════════
-def evaluate_ways(grid: list[list[int]]) -> tuple[int, list[tuple]]:
+def _rnd_ball() -> int:
+    return random.choice([BALL_R_IDX, BALL_B_IDX, BALL_G_IDX])
+
+
+def _ball_val(bet: int) -> int:
+    m = random.choices(_BV_MUL, weights=_BV_WGT, k=1)[0]
+    return max(1, bet * m // 10)
+
+
+def _ball_prob(bet_idx: int) -> float:
+    return 0.08 + bet_idx * 0.012
+
+
+def _spin_col(bet_idx: int, extra_ball: float = 0.0) -> list[int]:
+    """Erzeugt 3 Symbole für eine Walze — max. 1 Ball pro Walze."""
+    bp = _ball_prob(bet_idx) + extra_ball
+    syms: list[int] = []
+    has_ball = False
+    for _ in range(_ROWS):
+        if not has_ball and random.random() < bp:
+            syms.append(_rnd_ball())
+            has_ball = True
+        else:
+            syms.append(_rnd())
+    return syms
+
+
+# ── 243-Ways Auswertung ───────────────────────────────────────────────────────
+def evaluate_ways(grid: list[list[int]],
+                  mult: float = 1.0) -> tuple[int, list[tuple]]:
     """
     grid[reel][row]  —  5 Reels × 3 Reihen.
-    Gibt (Gesamtgewinn, [(sym, länge, multiplikator), …]) zurück.
-    Wild (WILD_IDX) ersetzt jedes Symbol außer ALICE_IDX.
+    Balls und Scatter werden ignoriert. mult skaliert Gewinne mit Einsatz.
     """
     wins: list[tuple] = []
     total = 0
 
-    # Alle möglichen Symbolkandidaten (ohne Scatter, ohne Wild als Basiswert)
-    base_syms = {s for col in grid for s in col
-                 if s not in (WILD_IDX, ALICE_IDX)}
+    candidates = {s for col in grid for s in col
+                  if s not in (WILD_IDX, ALICE_IDX) and s not in IS_BALL}
 
-    checked: set[int] = set()
-    for sym in base_syms:
-        if sym in checked:
-            continue
-        checked.add(sym)
-
-        # Wie viele Wege gibt es für dieses Symbol links→rechts?
+    for sym in candidates:
         ways = 1
         length = 0
-        for reel_idx in range(_REELS):
-            col = grid[reel_idx]
-            matches = sum(1 for s in col if s == sym or s == WILD_IDX)
-            if matches == 0:
+        for col in grid:
+            m = sum(1 for s in col if s == sym or s == WILD_IDX)
+            if m == 0:
                 break
-            ways   *= matches
+            ways   *= m
             length += 1
-
         if length >= 3:
-            sym_entry = SYMBOLS[sym]
-            if length == 5:
-                base_win = sym_entry[6]
-            elif length == 4:
-                base_win = sym_entry[5]
-            else:
-                base_win = sym_entry[4]
-            prize = base_win * ways
+            se = SYMBOLS[sym]
+            bw = se[6] if length == 5 else se[5] if length == 4 else se[4]
+            prize = max(1, int(bw * ways * mult))
             total += prize
             wins.append((sym, length, ways, prize))
 
-    # Wilds alleine (nur 5× Wild → Jackpot)
-    wild_reels = sum(1 for col in grid if all(s == WILD_IDX for s in col))
-    if wild_reels == 5:
-        total += SYMBOLS[WILD_IDX][6]
-        wins.append((WILD_IDX, 5, 1, SYMBOLS[WILD_IDX][6]))
+    if sum(1 for col in grid if all(s == WILD_IDX for s in col)) == _REELS:
+        jp = int(SYMBOLS[WILD_IDX][6] * mult)
+        total += jp
+        wins.append((WILD_IDX, 5, 1, jp))
 
     return total, wins
+
+
+# ── _PodWidget ────────────────────────────────────────────────────────────────
+class _PodWidget(QWidget):
+    """Zeigt Fortschritt eines Sammelpods (Bälle → Bonus)."""
+
+    def __init__(self, idx: int, parent=None) -> None:
+        super().__init__(parent)
+        self.idx  = idx
+        self._cnt = 0
+        self._lit = False
+        self.setFixedSize(118, 50)
+        self.setToolTip(f"{POD_EMOJIS[idx]} {POD_NAMES[idx]}\n{POD_CAP} Bälle → Bonus!")
+
+    @property
+    def count(self) -> int:
+        return self._cnt
+
+    @count.setter
+    def count(self, v: int) -> None:
+        self._cnt = min(int(v), POD_CAP)
+        self.update()
+
+    def flash_full(self) -> None:
+        self._lit = True
+        self.update()
+        QTimer.singleShot(2000, self._unlit)
+
+    def _unlit(self) -> None:
+        self._lit = False
+        self.update()
+
+    def reset(self) -> None:
+        self._cnt = 0
+        self._lit = False
+        self.update()
+
+    def paintEvent(self, _) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        base = QColor(POD_COLS[self.idx])
+        txt  = QColor(POD_TXT[self.idx])
+
+        bg = QColor(base)
+        bg.setAlpha(60 if self._lit else 22)
+        p.fillRect(0, 0, W, H, QBrush(bg))
+        p.setPen(QPen(base, 1.5 if self._lit else 1.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 6, 6)
+
+        f = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        p.setFont(f)
+        p.setPen(QPen(txt))
+        p.drawText(QRectF(2, 2, W - 4, 14), Qt.AlignmentFlag.AlignCenter,
+                   f"{POD_EMOJIS[self.idx]} {POD_NAMES[self.idx]}")
+
+        f2 = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        p.setFont(f2)
+        p.setPen(QPen(base))
+        p.drawText(QRectF(2, 15, W - 4, 13), Qt.AlignmentFlag.AlignCenter,
+                   f"{self._cnt} / {POD_CAP}")
+
+        dot_r = 4.5
+        gap   = (W - 10) / max(POD_CAP - 1, 1)
+        for i in range(POD_CAP):
+            cx2 = 5.0 + i * gap
+            cy2 = float(H - 9)
+            if i < self._cnt:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(base))
+            else:
+                p.setPen(QPen(base, 1))
+                dk = QColor(base)
+                dk.setAlpha(30)
+                p.setBrush(QBrush(dk))
+            p.drawEllipse(QPointF(cx2, cy2), dot_r, dot_r)
+        p.end()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -125,6 +244,7 @@ class _Reel(QWidget):
         self._flash:  float        = 0.0
         self.held:    bool         = False
         self._ht:     float        = 0.0
+        self._ball_vals: list[int | None] = [None, None, None]
 
     # ── Sichtbare Symbole ──────────────────────────────────────────────────────
     def visible_symbols(self) -> list[int]:
@@ -172,7 +292,13 @@ class _Reel(QWidget):
     def flash_win(self, rows: set[int] | None = None) -> None:
         self._flash      = 1.0
         self._flash_rows = rows or {0, 1, 2}
+    def set_ball_val(self, row: int, val: int | None) -> None:
+        self._ball_vals[row] = val
+        self.update()
 
+    def clear_ball_vals(self) -> None:
+        self._ball_vals = [None, None, None]
+        self.update()
     # ── Tick ───────────────────────────────────────────────────────────────────
     def tick(self) -> bool:
         if self.held:
@@ -243,6 +369,20 @@ class _Reel(QWidget):
 
             draw_symbol(p, sym_i, W / 2.0, cy, SH * 0.38, fade)
 
+            # Ball-Kreditwert-Badge (nur bei Holding Spin, k in sichtbarem Bereich)
+            if 0 <= k < _ROWS and self._ball_vals[k] is not None and fade > 0.25:
+                bv = self._ball_vals[k]
+                bw, bh = 38, 14
+                p.setOpacity(fade * 0.95)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(QColor(0, 0, 0, 190)))
+                p.drawRoundedRect(QRectF(W / 2 - bw / 2, cy + SH * 0.26, bw, bh), 4, 4)
+                bf = QFont("Segoe UI", 7, QFont.Weight.Bold)
+                p.setFont(bf)
+                p.setPen(QPen(QColor("#f9a825")))
+                p.drawText(QRectF(W / 2 - bw / 2, cy + SH * 0.26, bw, bh),
+                           Qt.AlignmentFlag.AlignCenter, f"+{bv}")
+
         p.setOpacity(1.0)
 
         # Flash-Overlay auf Gewinn-Zeilen
@@ -280,24 +420,38 @@ class _Reel(QWidget):
 #  SlotMachineDialog
 # ══════════════════════════════════════════════════════════════════════════════
 class SlotMachineDialog(QDialog):
-    """🎩 Alice im Wunderland — 5×3 · 243 Ways · Wild · Alice-Bonus"""
+    """🎩 Alice im Wunderland — 5×3 · 243 Ways · Wild · Bonus Balls · Free Games"""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("🎩 Alice im Wunderland — Glücksrad")
-        self.setWindowFlags(
-            Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
-        )
+        self.setWindowTitle("🎩 Alice's Wunderrad")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(580, 700)
+        self.setFixedSize(610, 830)
 
-        self._credits          = 100
-        self._mode             = "idle"
-        self._bonus_spins_left = 0
-        self._held_reels: set[int]    = set()
-        self._reels:      list[_Reel] = []
-        self._stop_timers: list[QTimer] = []
-        self._drag_pos = None
+        # ── Basis-State ───────────────────────────────────────────────────────
+        self._credits   = 200
+        self._bet_idx   = _DEF_BET_IDX
+        self._mode      = "idle"    # idle|spinning|freespinning|holdspinning|waiting
+        self._drag_pos  = None
+
+        # Pods
+        self._pod_counts: list[int] = [0, 0, 0]
+
+        # Holding Spin
+        self._hold_reels: set[int]                        = set()
+        self._hold_vals:  dict[int, list[tuple[int,int]]] = {}   # reel→[(row,val)]
+        self._hold_respins: int = 0
+        self._hold_bet:     int = 0
+
+        # Free Games
+        self._fs_left:      int              = 0
+        self._fs_total:     int              = 0
+        self._sticky_wilds: set[tuple[int,int]] = set()
+
+        self._reels:      list[_Reel]    = []
+        self._pods_ui:    list[_PodWidget] = []
+        self._stop_timers: list[QTimer]  = []
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
@@ -305,6 +459,7 @@ class SlotMachineDialog(QDialog):
 
         self._build_ui()
         self._update_credits()
+        self._update_bet_ui()
 
     # ── UI ─────────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -324,109 +479,158 @@ class SlotMachineDialog(QDialog):
         outer.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(16, 12, 16, 14)
-        lay.setSpacing(7)
+        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setSpacing(6)
 
         # ── Titelzeile ──────────────────────────────────────────────────────
-        title_row = QHBoxLayout()
-        title_lbl = QLabel("🎩  Alice's Wunderrad  🐇")
-        title_lbl.setStyleSheet(
-            "color:#c9a227; font:bold 17px 'Segoe UI'; background:transparent;"
+        tr = QHBoxLayout()
+        tl = QLabel("🎩  Alice's Wunderrad  🐇")
+        tl.setStyleSheet(
+            "color:#c9a227; font:bold 16px 'Segoe UI'; background:transparent;"
         )
-        title_row.addWidget(title_lbl)
-        ways_lbl = QLabel("2 4 3  W A Y S")
-        ways_lbl.setStyleSheet(
-            "color:#8e44ad; font:bold 11px 'Segoe UI'; background:transparent;"
+        tr.addWidget(tl)
+        tr.addStretch()
+        wl = QLabel("2 4 3  W A Y S")
+        wl.setStyleSheet(
+            "color:#8e44ad; font:bold 10px 'Segoe UI'; background:transparent;"
         )
-        title_row.addStretch()
-        title_row.addWidget(ways_lbl)
-        title_row.addSpacing(10)
-        btn_x = QPushButton("✕")
-        btn_x.setFixedSize(26, 26)
-        btn_x.setStyleSheet("""
+        tr.addWidget(wl)
+        tr.addSpacing(8)
+        bx = QPushButton("✕")
+        bx.setFixedSize(24, 24)
+        bx.setStyleSheet("""
             QPushButton {
                 background:#2d0a50; color:#c9a0e0;
-                border:none; border-radius:13px; font-size:12px;
+                border:none; border-radius:12px; font-size:11px;
             }
             QPushButton:hover { background:#c0392b; color:white; }
         """)
-        btn_x.clicked.connect(self.close)
-        title_row.addWidget(btn_x)
-        lay.addLayout(title_row)
+        bx.clicked.connect(self.close)
+        tr.addWidget(bx)
+        lay.addLayout(tr)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color:#6c348350;")
         lay.addWidget(sep)
 
-        # ── Credits ─────────────────────────────────────────────────────────
+        # ── Credits + Einsatz ────────────────────────────────────────────────
         cr = QHBoxLayout()
-        cr.addStretch()
         self._cred_lbl = QLabel()
         self._cred_lbl.setStyleSheet("""
             QLabel {
-                color:#c9a227; font:bold 15px 'Segoe UI';
+                color:#c9a227; font:bold 14px 'Segoe UI';
                 background:#0f0230; border:1px solid #6c3483;
-                border-radius:8px; padding:2px 14px;
+                border-radius:7px; padding:2px 12px;
             }
         """)
         cr.addWidget(self._cred_lbl)
         cr.addStretch()
+
+        bet_lbl_prefix = QLabel("Einsatz:")
+        bet_lbl_prefix.setStyleSheet(
+            "color:#8e44ad; font:10px 'Segoe UI'; background:transparent;"
+        )
+        bet_minus = QPushButton("▼")
+        bet_minus.setFixedSize(22, 22)
+        bet_minus.setStyleSheet("""
+            QPushButton {
+                background:#1a073d; color:#c9a0e0;
+                border:1px solid #6c3483; border-radius:4px; font-size:9px;
+            }
+            QPushButton:hover { background:#6c3483; }
+        """)
+        bet_minus.clicked.connect(self._bet_down)
+        self._bet_lbl = QLabel()
+        self._bet_lbl.setFixedWidth(66)
+        self._bet_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._bet_lbl.setStyleSheet("""
+            QLabel {
+                color:#c9a227; font:bold 10px 'Segoe UI';
+                background:#0f0230; border:1px solid #6c348360;
+                border-radius:4px; padding:1px 4px;
+            }
+        """)
+        bet_plus = QPushButton("▲")
+        bet_plus.setFixedSize(22, 22)
+        bet_plus.setStyleSheet("""
+            QPushButton {
+                background:#1a073d; color:#c9a0e0;
+                border:1px solid #6c3483; border-radius:4px; font-size:9px;
+            }
+            QPushButton:hover { background:#6c3483; }
+        """)
+        bet_plus.clicked.connect(self._bet_up)
+        cr.addWidget(bet_lbl_prefix)
+        cr.addSpacing(4)
+        cr.addWidget(bet_minus)
+        cr.addWidget(self._bet_lbl)
+        cr.addWidget(bet_plus)
         lay.addLayout(cr)
 
-        # ── Reel-Rahmen ─────────────────────────────────────────────────────
-        reel_frame = QFrame()
-        reel_frame.setStyleSheet("""
+        # ── 3 Sammelpods ─────────────────────────────────────────────────────
+        pod_row = QHBoxLayout()
+        pod_row.setSpacing(5)
+        pod_row.addStretch()
+        for i in range(3):
+            pw = _PodWidget(i)
+            self._pods_ui.append(pw)
+            pod_row.addWidget(pw)
+        pod_row.addStretch()
+        lay.addLayout(pod_row)
+
+        # ── Reel-Rahmen ──────────────────────────────────────────────────────
+        rf = QFrame()
+        rf.setStyleSheet("""
             QFrame {
                 background: rgba(10,2,30,200);
                 border: 2px solid #4a235a;
                 border-radius: 10px;
             }
         """)
-        reel_lay = QHBoxLayout(reel_frame)
-        reel_lay.setContentsMargins(8, 8, 8, 8)
-        reel_lay.setSpacing(5)
-        reel_lay.addStretch()
+        rl = QHBoxLayout(rf)
+        rl.setContentsMargins(8, 8, 8, 8)
+        rl.setSpacing(5)
+        rl.addStretch()
         for _ in range(_REELS):
             r = _Reel()
             self._reels.append(r)
-            reel_lay.addWidget(r)
-        reel_lay.addStretch()
-        lay.addWidget(reel_frame)
+            rl.addWidget(r)
+        rl.addStretch()
+        lay.addWidget(rf)
 
         # ── Ergebnis-Label ───────────────────────────────────────────────────
         self._res_lbl = QLabel("")
         self._res_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._res_lbl.setFixedHeight(38)
+        self._res_lbl.setFixedHeight(36)
         self._res_lbl.setWordWrap(True)
         self._res_lbl.setStyleSheet(
-            "color:white; font:bold 13px 'Segoe UI'; background:transparent;"
+            "color:white; font:bold 12px 'Segoe UI'; background:transparent;"
         )
         lay.addWidget(self._res_lbl)
 
-        # ── Bonus-Banner ─────────────────────────────────────────────────────
-        self._bonus_lbl = QLabel("")
-        self._bonus_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._bonus_lbl.setFixedHeight(26)
-        self._bonus_lbl.setStyleSheet("""
+        # ── Modus-Banner ─────────────────────────────────────────────────────
+        self._mode_lbl = QLabel("")
+        self._mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mode_lbl.setFixedHeight(24)
+        self._mode_lbl.setStyleSheet("""
             QLabel {
-                color:#c9a227; font:bold 11px 'Segoe UI';
-                background:rgba(201,162,39,15);
-                border:1px solid #c9a22750;
-                border-radius:5px;
+                color:#c9a227; font:bold 10px 'Segoe UI';
+                background:rgba(201,162,39,12);
+                border:1px solid #c9a22750; border-radius:5px;
             }
         """)
-        self._bonus_lbl.hide()
-        lay.addWidget(self._bonus_lbl)
+        self._mode_lbl.hide()
+        lay.addWidget(self._mode_lbl)
 
         # ── Spin-Button ──────────────────────────────────────────────────────
-        self._spin_btn = QPushButton(f"🎰   DREHEN   –  {_COST} Credits")
-        self._spin_btn.setFixedHeight(46)
+        self._spin_btn = QPushButton("🎰   DREHEN")
+        self._spin_btn.setFixedHeight(44)
         self._spin_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 #e74c3c, stop:1 #922b21);
-                color:white; font:bold 14px 'Segoe UI';
+                color:white; font:bold 13px 'Segoe UI';
                 border:none; border-radius:10px;
             }
             QPushButton:hover {
@@ -439,62 +643,59 @@ class SlotMachineDialog(QDialog):
         lay.addWidget(self._spin_btn)
 
         # ── +Credits ─────────────────────────────────────────────────────────
-        btn_add = QPushButton("🪙  +100 Credits")
+        btn_add = QPushButton("🪙  +200 Credits")
         btn_add.setStyleSheet("""
             QPushButton {
-                background:transparent; color:#c9a227; font:11px 'Segoe UI';
-                border:1px solid #c9a22740; border-radius:5px; padding:2px 12px;
+                background:transparent; color:#c9a227; font:10px 'Segoe UI';
+                border:1px solid #c9a22740; border-radius:5px; padding:2px 10px;
             }
             QPushButton:hover { background:rgba(201,162,39,18); }
         """)
         btn_add.clicked.connect(self._add_credits)
         lay.addWidget(btn_add, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # ── Legende ──────────────────────────────────────────────────────────
-        leg = QFrame()
-        leg.setStyleSheet("""
+        # ── Info-Legende ─────────────────────────────────────────────────────
+        info = QFrame()
+        info.setStyleSheet("""
             QFrame {
                 background:rgba(15,3,35,180);
                 border:1px solid #4a235a; border-radius:7px;
             }
         """)
-        lv = QVBoxLayout(leg)
-        lv.setContentsMargins(6, 4, 6, 4)
-        lv.setSpacing(2)
-
-        # Zeile 1 — erste 6 Symbole
-        for row_slice in [SYMBOLS[:6], SYMBOLS[6:]]:
+        iv = QVBoxLayout(info)
+        iv.setContentsMargins(5, 3, 5, 3)
+        iv.setSpacing(1)
+        for row_sl in [SYMBOLS[:6], SYMBOLS[6:11]]:
             row = QHBoxLayout()
             row.setSpacing(0)
-            for em, name, col, _, w3, w4, w5 in row_slice:
-                is_wild    = (em == SYMBOLS[WILD_IDX][0])
-                is_scatter = (em == SYMBOLS[ALICE_IDX][0])
-                badge = " W" if is_wild else (" S" if is_scatter else "")
-                lb = QLabel(f"{em}{badge}  {w3}·{w4}·{w5}")
+            for em, name, col, _, w3, w4, w5 in row_sl:
+                is_w = (em == SYMBOLS[WILD_IDX][0])
+                is_s = (em == SYMBOLS[ALICE_IDX][0])
+                badge = " W" if is_w else (" S" if is_s else "")
+                lb = QLabel(f"{em}{badge} {w3}·{w4}·{w5}")
                 lb.setStyleSheet(
-                    f"color:{'#ffffff' if is_wild else col};"
-                    f"{'font-weight:bold;' if is_wild or is_scatter else ''}"
-                    f"font-size:8px; font-family:'Segoe UI'; background:transparent;"
+                    f"color:{'#ffffff' if is_w else col};"
+                    f"{'font-weight:bold;' if is_w or is_s else ''}"
+                    f"font-size:7px; font-family:'Segoe UI'; background:transparent;"
                 )
                 lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 row.addWidget(lb)
-            lv.addLayout(row)
-
+            iv.addLayout(row)
         note = QLabel(
-            "🪄 Wild ersetzt alle  ·  👸 3+ Scatter = BONUS  ·  243 Ways = alle Kombi-Treffer l→r"
+            "🔴🔵⭐ Bonusbälle → Pods  ·  6 Bälle/Spin → Holding Spin  ·  "
+            "3×👸 → 10 Free Games  ·  Pods voll → Bonus"
         )
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         note.setStyleSheet(
             "color:#8e44ad70; font:7px 'Segoe UI'; background:transparent;"
         )
-        lv.addWidget(note)
-        lay.addWidget(leg)
+        iv.addWidget(note)
+        lay.addWidget(info)
 
-        # ── Fußzeile ─────────────────────────────────────────────────────────
         foot = QLabel("🐇  Folge dem weißen Kaninchen  🎩")
         foot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         foot.setStyleSheet(
-            "color:#4a235a90; font:italic 9px 'Segoe UI'; background:transparent;"
+            "color:#4a235a80; font:italic 8px 'Segoe UI'; background:transparent;"
         )
         lay.addWidget(foot)
 
@@ -502,43 +703,73 @@ class SlotMachineDialog(QDialog):
     def _update_credits(self) -> None:
         self._cred_lbl.setText(f"🪙  {self._credits}  Credits")
 
+    def _update_bet_ui(self) -> None:
+        bet = BET_LEVELS[self._bet_idx]
+        self._bet_lbl.setText(f"  {bet} Cr.")
+        self._spin_btn.setText(f"🎰   DREHEN  –  {bet} Cr.")
+
+    def _bet_down(self) -> None:
+        if self._mode != "idle":
+            return
+        self._bet_idx = max(0, self._bet_idx - 1)
+        self._update_bet_ui()
+
+    def _bet_up(self) -> None:
+        if self._mode != "idle":
+            return
+        self._bet_idx = min(len(BET_LEVELS) - 1, self._bet_idx + 1)
+        self._update_bet_ui()
+
     def _add_credits(self) -> None:
-        self._credits += 100
+        self._credits += 200
         self._update_credits()
-        self._res_lbl.setText("🪙  +100 Credits aufgeladen!")
-        if self._mode == "idle":
-            self._spin_btn.setEnabled(True)
+        self._res_lbl.setText("🪙  +200 Credits aufgeladen!")
+        self._check_can_spin()
+
+    def _check_can_spin(self) -> None:
+        can = (self._mode == "idle"
+               and self._fs_left == 0
+               and not self._hold_reels
+               and self._credits >= BET_LEVELS[self._bet_idx])
+        self._spin_btn.setEnabled(can)
 
     def _grid(self) -> list[list[int]]:
-        """Gibt aktuelle 5×3 Grid zurück: grid[reel][row]."""
         return [r.visible_symbols() for r in self._reels]
 
     # ── Spin ───────────────────────────────────────────────────────────────────
     def _spin(self) -> None:
         if self._mode != "idle":
             return
-        if self._credits < _COST:
+        bet = BET_LEVELS[self._bet_idx]
+        if self._credits < bet:
             self._res_lbl.setText("❌  Nicht genug Credits!")
             return
 
-        self._credits -= _COST
+        self._credits -= bet
         self._spin_btn.setEnabled(False)
         self._mode = "spinning"
         self._res_lbl.setText("")
         self._update_credits()
 
-        # Zufalls-Ergebnisse: 3 Symbole je Reel
-        results = [[_rnd() for _ in range(_ROWS)] for _ in range(_REELS)]
+        results = [_spin_col(self._bet_idx) for _ in range(_REELS)]
+        self._start_reels(results)
 
-        for r in self._reels:
-            r.start()
-
-        # Gestaffeltes Stoppen: 350 · 650 · 950 · 1250 · 1550 ms (schneller!)
+    def _start_reels(self, results: list[list[int]],
+                     delays: list[int] | None = None) -> None:
+        """Startet Walzen und stoppt sie gestaffelt."""
+        for ri, r in enumerate(self._reels):
+            if ri not in self._hold_reels:
+                r.start()
+        if delays is None:
+            delays = [350 + i * 280 for i in range(_REELS)]
         for idx, (reel, syms) in enumerate(zip(self._reels, results)):
+            if idx in self._hold_reels:
+                continue
+            d = delays[idx] if idx < len(delays) else delays[-1] + idx * 200
             t = QTimer(self)
             t.setSingleShot(True)
             t.timeout.connect(lambda r=reel, s=syms: r.schedule_stop(s))
-            t.start(350 + idx * 300)
+            t.start(d)
             self._stop_timers.append(t)
 
     # ── Tick ───────────────────────────────────────────────────────────────────
@@ -549,159 +780,361 @@ class SlotMachineDialog(QDialog):
         if self._mode == "spinning":
             if all(r.stopped for r in self._reels):
                 self._stop_timers.clear()
-                self._mode = "idle"
+                self._mode = "waiting"
                 self._evaluate()
 
-        elif self._mode == "bonus_spinning":
-            non_held = [i for i in range(_REELS) if i not in self._held_reels]
-            if all(self._reels[i].stopped for i in non_held):
+        elif self._mode == "freespinning":
+            if all(r.stopped for r in self._reels):
                 self._stop_timers.clear()
-                self._mode = "idle"
-                self._evaluate_bonus_spin()
+                self._mode = "waiting"
+                self._evaluate_freespin()
 
-    # ── Auswertung ─────────────────────────────────────────────────────────────
+        elif self._mode == "holdspinning":
+            non_held = [i for i in range(_REELS) if i not in self._hold_reels]
+            if (not non_held) or all(self._reels[i].stopped for i in non_held):
+                self._stop_timers.clear()
+                self._mode = "waiting"
+                self._evaluate_holdspin()
+
+    # ── Ball-Verarbeitung ──────────────────────────────────────────────────────
+    def _process_balls(self, grid: list[list[int]], bet: int
+                       ) -> tuple[dict[int, list[tuple[int,int]]], list[int]]:
+        """Wertet alle Bälle im Grid aus → (ball_data, gefüllte_pods)."""
+        ball_data: dict[int, list[tuple[int,int]]] = {}
+        filled:    list[int] = []
+        for ri, col in enumerate(grid):
+            for row, sym in enumerate(col):
+                if sym in IS_BALL:
+                    val = _ball_val(bet)
+                    ball_data.setdefault(ri, []).append((row, val))
+                    pod = BALL_TO_POD[sym]
+                    self._pod_counts[pod] += 1
+                    self._pods_ui[pod].count = self._pod_counts[pod]
+                    if self._pod_counts[pod] >= POD_CAP:
+                        self._pod_counts[pod] = 0
+                        self._pods_ui[pod].reset()
+                        self._pods_ui[pod].flash_full()
+                        filled.append(pod)
+        return ball_data, filled
+
+    # ── Normale Auswertung ─────────────────────────────────────────────────────
     def _evaluate(self) -> None:
-        grid       = self._grid()
-        flat       = [s for col in grid for s in col]
-        alice_cnt  = sum(1 for s in flat if s == ALICE_IDX)
+        grid = self._grid()
+        bet  = BET_LEVELS[self._bet_idx]
+        mult = bet / 10.0
 
-        if alice_cnt >= 3:
-            self._start_bonus(grid)
-            return
+        ball_data, pod_bonuses = self._process_balls(grid, bet)
 
-        total, wins = evaluate_ways(grid)
+        alice_cnt = sum(1 for col in grid for s in col if s == ALICE_IDX)
 
+        total, wins = evaluate_ways(grid, mult)
         if total > 0:
             self._credits += total
-            # Gewinn-Flash: markiere Zeilen die zu Gewinnen beitragen
-            for sym, length, ways, prize in wins:
-                for reel_idx in range(length):
-                    cols = grid[reel_idx]
-                    hit_rows = {r for r, s in enumerate(cols)
-                                if s == sym or s == WILD_IDX}
-                    self._reels[reel_idx].flash_win(hit_rows)
-
-            parts = [
-                f"{SYMBOLS[sym][0]}×{length}({ways}w)=+{prize}"
-                for sym, length, ways, prize in wins[:3]
-            ]
+            for sym, L, ways, prize in wins:
+                for ri in range(L):
+                    hit = {r for r, s in enumerate(grid[ri])
+                           if s == sym or s == WILD_IDX}
+                    self._reels[ri].flash_win(hit)
+            parts = [f"{SYMBOLS[s][0]}×{l}({w}w)=+{pr}"
+                     for s, l, w, pr in wins[:3]]
             msg = "  ".join(parts)
             if len(wins) > 3:
-                msg += f"  (+{len(wins)-3} weitere)"
+                msg += f"  (+{len(wins)-3})"
             self._res_lbl.setText(f"🎊  {msg}")
         else:
             self._res_lbl.setText("😿  Kein Treffer.")
-
         self._update_credits()
-        self._spin_btn.setEnabled(self._credits >= _COST)
 
-    # ── Bonus ──────────────────────────────────────────────────────────────────
-    def _start_bonus(self, grid: list[list[int]]) -> None:
-        self._held_reels       = set()
-        self._bonus_spins_left = _BONUS_SPINS
+        # Pod-Boni mit kurzer Verzögerung
+        for i, pb in enumerate(pod_bonuses):
+            QTimer.singleShot(400 + i * 600, lambda p=pb: self._award_pod_bonus(p))
 
-        for reel_idx, col in enumerate(grid):
-            if ALICE_IDX in col:
-                self._held_reels.add(reel_idx)
-                row_set = {r for r, s in enumerate(col) if s == ALICE_IDX}
-                self._reels[reel_idx].held = True
-                self._reels[reel_idx].flash_win(row_set)
-
-        n = len(self._held_reels)
-        self._bonus_lbl.setText(
-            f"👸  ALICE-BONUS!  {n} Reel(s) mit Alice  —  {_BONUS_SPINS} Holding Spins"
-        )
-        self._bonus_lbl.show()
-        self._res_lbl.setText(f"👸  {n}× Alice gefunden!  Bonus startet…")
-        QTimer.singleShot(1200, self._run_bonus_spin)
-
-    def _run_bonus_spin(self) -> None:
-        if self._bonus_spins_left <= 0 or len(self._held_reels) >= _REELS:
-            self._end_bonus()
+        # Trigger-Priorität: Holding Spin > Free Games
+        ball_count = sum(len(v) for v in ball_data.values())
+        if ball_count >= _HOLD_TRIGGER:
+            QTimer.singleShot(800, lambda: self._trigger_holdspin(ball_data, bet))
             return
 
-        self._bonus_spins_left -= 1
-        non_held = [i for i in range(_REELS) if i not in self._held_reels]
+        if alice_cnt >= 3:
+            QTimer.singleShot(800, lambda: self._trigger_freegames(alice_cnt))
+            return
 
-        # Erhöhte Alice-Wahrscheinlichkeit (28%)
-        results = {
-            i: [ALICE_IDX if random.random() < 0.28 else _rnd()
-                for _ in range(_ROWS)]
-            for i in non_held
-        }
+        self._mode = "idle"
+        self._check_can_spin()
 
-        for i in non_held:
-            self._reels[i].start()
+    # ── Holding Spin ───────────────────────────────────────────────────────────
+    def _trigger_holdspin(self, ball_data: dict[int, list[tuple[int,int]]],
+                          bet: int) -> None:
+        self._hold_reels   = set(ball_data.keys())
+        self._hold_vals    = {ri: list(cells) for ri, cells in ball_data.items()}
+        self._hold_respins = _HOLD_RESPINS
+        self._hold_bet     = bet
 
-        self._mode = "bonus_spinning"
+        for ri, cells in ball_data.items():
+            self._reels[ri].held = True
+            for row, val in cells:
+                self._reels[ri].set_ball_val(row, val)
 
-        for j, i in enumerate(non_held):
+        ball_count = sum(len(v) for v in ball_data.values())
+        total_val  = sum(val for cells in ball_data.values() for _, val in cells)
+        self._mode_lbl.setText(
+            f"🔮  HOLDING SPIN!  {ball_count} Bälle  ·  Wert: +{total_val}  ·  {_HOLD_RESPINS} Respins"
+        )
+        self._mode_lbl.show()
+        self._res_lbl.setText(f"🔮  {ball_count} Bonusbälle!  Holding Spin startet…")
+        QTimer.singleShot(1600, self._run_holdspin)
+
+    def _run_holdspin(self) -> None:
+        non_held = [i for i in range(_REELS) if i not in self._hold_reels]
+        if not non_held:
+            self._end_holdspin()
+            return
+
+        total_val = sum(val for cells in self._hold_vals.values() for _, val in cells)
+        self._mode_lbl.setText(
+            f"🔮  HOLDING  ·  {len(self._hold_reels)}/5 gesperrt  "
+            f"·  Wert: +{total_val}  ·  Respins: {self._hold_respins}"
+        )
+
+        # Hohe Ball-Chance auf freien Walzen (40 %)
+        results = [_spin_col(self._bet_idx, extra_ball=0.35) for _ in range(_REELS)]
+        self._mode = "holdspinning"
+
+        for j, ri in enumerate(non_held):
             t = QTimer(self)
             t.setSingleShot(True)
             t.timeout.connect(
-                lambda r=self._reels[i], s=results[i]: r.schedule_stop(s)
+                lambda r=self._reels[ri], s=results[ri]: r.schedule_stop(s)
             )
-            t.start(350 + j * 280)
+            t.start(280 + j * 220)
             self._stop_timers.append(t)
 
-        self._bonus_lbl.setText(
-            f"👸  HOLDING SPINS  —  {len(self._held_reels)} Hold  "
-            f"—  noch {self._bonus_spins_left} Spin(s)"
-        )
-        self._res_lbl.setText("🎠  …")
-
-    def _evaluate_bonus_spin(self) -> None:
+    def _evaluate_holdspin(self) -> None:
         grid = self._grid()
-        new_holds: list[int] = []
+        new_balls: list[tuple[int,int,int]] = []
 
-        for i in range(_REELS):
-            if i not in self._held_reels:
-                col = grid[i]
-                if ALICE_IDX in col:
-                    new_holds.append(i)
-                    self._held_reels.add(i)
-                    rows = {r for r, s in enumerate(col) if s == ALICE_IDX}
-                    self._reels[i].held = True
-                    self._reels[i].flash_win(rows)
+        for ri in range(_REELS):
+            if ri in self._hold_reels:
+                continue
+            for row, sym in enumerate(grid[ri]):
+                if sym in IS_BALL:
+                    val = _ball_val(self._hold_bet)
+                    new_balls.append((ri, row, val))
+                    pod = BALL_TO_POD[sym]
+                    self._pod_counts[pod] += 1
+                    self._pods_ui[pod].count = self._pod_counts[pod]
+                    if self._pod_counts[pod] >= POD_CAP:
+                        self._pod_counts[pod] = 0
+                        self._pods_ui[pod].reset()
+                        self._pods_ui[pod].flash_full()
+                        QTimer.singleShot(200, lambda p=pod: self._award_pod_bonus(p))
 
-        if new_holds:
+        if new_balls:
+            for ri, row, val in new_balls:
+                self._hold_reels.add(ri)
+                self._hold_vals.setdefault(ri, []).append((row, val))
+                self._reels[ri].held = True
+                self._reels[ri].set_ball_val(row, val)
+            self._hold_respins = _HOLD_RESPINS
+            n = len({ri for ri, _, _ in new_balls})
             self._res_lbl.setText(
-                f"👸  {len(new_holds)} neue Alice!  ({len(self._held_reels)}/{_REELS} Reels)"
+                f"🔮  +{n} Walze(n) gesperrt!  Respins reset → {_HOLD_RESPINS}"
             )
         else:
-            self._res_lbl.setText(
-                f"⏳  {self._bonus_spins_left} Spin(s) verbleibend…"
-                if self._bonus_spins_left > 0 else "🎩  Bonus endet…"
-            )
+            self._hold_respins -= 1
+            txt = (f"⏳  Kein neuer Ball  ·  {self._hold_respins} Respin(s)"
+                   if self._hold_respins > 0 else "🔮  Holding Spin endet…")
+            self._res_lbl.setText(txt)
 
-        delay = 900 if new_holds else 500
-        if self._bonus_spins_left <= 0 or len(self._held_reels) >= _REELS:
-            QTimer.singleShot(delay, self._end_bonus)
+        total_val = sum(val for cells in self._hold_vals.values() for _, val in cells)
+        if self._hold_respins <= 0 or len(self._hold_reels) >= _REELS:
+            QTimer.singleShot(700, self._end_holdspin)
         else:
-            QTimer.singleShot(delay, self._run_bonus_spin)
+            self._mode_lbl.setText(
+                f"🔮  HOLDING  ·  {len(self._hold_reels)}/5 gesperrt  "
+                f"·  Wert: +{total_val}  ·  Respins: {self._hold_respins}"
+            )
+            QTimer.singleShot(700 if new_balls else 450, self._run_holdspin)
 
-    def _end_bonus(self) -> None:
-        alice_n = len(self._held_reels)
-        win     = _BONUS_WINS.get(alice_n, alice_n * 80)
-        self._credits += win
+    def _end_holdspin(self) -> None:
+        total_val = sum(val for cells in self._hold_vals.values() for _, val in cells)
+        ball_cnt  = sum(len(c) for c in self._hold_vals.values())
+        self._credits += total_val
 
         for r in self._reels:
             r.held = False
-            if win > 0:
+            r.clear_ball_vals()
+            if total_val > 0:
                 r.flash_win()
-        self._held_reels.clear()
-        self._bonus_lbl.hide()
 
-        if alice_n == 5:
-            msg = f"👑  MEGA-BONUS!  5 Reels voll Alice  =  +{win} Credits!  👑"
-        elif alice_n == 4:
-            msg = f"🎊  SUPER-BONUS!  4×👸  =  +{win} Credits!"
+        self._hold_reels.clear()
+        self._hold_vals.clear()
+        self._hold_respins = 0
+        self._mode_lbl.hide()
+
+        if ball_cnt >= _REELS:
+            msg = f"🎊  MEGA HOLD!  {ball_cnt} Bälle  =  +{total_val} Credits!  🔥"
+        elif ball_cnt >= 3:
+            msg = f"✨  SUPER HOLD!  {ball_cnt} Bälle  =  +{total_val} Credits!"
         else:
-            msg = f"✨  Bonus: {alice_n}×👸  =  +{win} Credits"
+            msg = f"🔮  Holding Spin: {ball_cnt} Bälle  =  +{total_val} Credits"
 
         self._res_lbl.setText(msg)
         self._update_credits()
-        self._spin_btn.setEnabled(self._credits >= _COST)
+        self._mode = "idle"
+        self._check_can_spin()
+
+    # ── Free Games ─────────────────────────────────────────────────────────────
+    def _trigger_freegames(self, alice_cnt: int) -> None:
+        extra = max(0, alice_cnt - 3) * _FS_RETRIG
+        self._fs_total = _FS_BASE + extra
+        self._fs_left  = self._fs_total
+        self._sticky_wilds.clear()
+        self._mode_lbl.setText(
+            f"👸  FREE GAMES!  {self._fs_total} Spins  ·  {_FS_MULT}×  ·  Sticky Wilds"
+        )
+        self._mode_lbl.show()
+        self._res_lbl.setText(
+            f"👸  {alice_cnt}× Alice!  {self._fs_total} Free Games starten…"
+        )
+        QTimer.singleShot(1800, self._run_freespin)
+
+    def _run_freespin(self) -> None:
+        if self._fs_left <= 0:
+            self._end_freegames()
+            return
+
+        self._fs_left -= 1
+
+        # Ergebnisse erzeugen: Sticky Wilds beibehalten + leicht erhöhte Wild-Chance
+        results = []
+        for ri in range(_REELS):
+            col = _spin_col(self._bet_idx, extra_ball=0.02)
+            for row in range(_ROWS):
+                if (ri, row) in self._sticky_wilds:
+                    col[row] = WILD_IDX
+                elif col[row] not in (ALICE_IDX,) and random.random() < 0.05:
+                    col[row] = WILD_IDX
+            results.append(col)
+
+        for r in self._reels:
+            r.start()
+
+        self._mode = "freespinning"
+
+        for idx, (reel, syms) in enumerate(zip(self._reels, results)):
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(lambda r=reel, s=syms: r.schedule_stop(s))
+            t.start(260 + idx * 200)
+            self._stop_timers.append(t)
+
+        self._mode_lbl.setText(
+            f"👸  FREE GAMES  ·  {self._fs_left + 1}/{self._fs_total}  "
+            f"·  {_FS_MULT}×  ·  Stickies: {len(self._sticky_wilds)}"
+        )
+
+    def _evaluate_freespin(self) -> None:
+        grid = self._grid()
+        bet  = BET_LEVELS[self._bet_idx]
+        mult = bet / 10.0 * _FS_MULT
+
+        ball_data, pod_bonuses = self._process_balls(grid, bet)
+        for i, pb in enumerate(pod_bonuses):
+            QTimer.singleShot(200 + i * 400, lambda p=pb: self._award_pod_bonus(p))
+
+        # Retrigger
+        alice_cnt = sum(1 for col in grid for s in col if s == ALICE_IDX)
+        if alice_cnt >= 3:
+            bonus = _FS_RETRIG * alice_cnt
+            self._fs_left += bonus
+            self._res_lbl.setText(f"👸  Retrigger! +{bonus} Free Spins!")
+
+        # Sticky Wilds
+        for ri, col in enumerate(grid):
+            for row, sym in enumerate(col):
+                if sym == WILD_IDX:
+                    self._sticky_wilds.add((ri, row))
+
+        total, wins = evaluate_ways(grid, mult)
+        if total > 0:
+            self._credits += total
+            for sym, L, ways, prize in wins:
+                for ri in range(L):
+                    hit = {r for r, s in enumerate(grid[ri])
+                           if s == sym or s == WILD_IDX}
+                    self._reels[ri].flash_win(hit)
+            parts = [f"{SYMBOLS[s][0]}×{l}=+{pr}" for s, l, w, pr in wins[:3]]
+            if alice_cnt < 3:
+                self._res_lbl.setText(f"✨{_FS_MULT}×  " + "  ".join(parts))
+        else:
+            if alice_cnt < 3:
+                self._res_lbl.setText(f"⭐  {self._fs_left} Free Game(s) verbleibend")
+
+        self._update_credits()
+
+        if self._fs_left <= 0:
+            QTimer.singleShot(950, self._end_freegames)
+        else:
+            QTimer.singleShot(650, self._run_freespin)
+
+    def _end_freegames(self) -> None:
+        for r in self._reels:
+            r.flash_win()
+        self._sticky_wilds.clear()
+        self._mode_lbl.hide()
+        total = self._fs_total
+        self._fs_total = 0
+        self._res_lbl.setText(f"👸  Free Games beendet!  {total} Spins gespielt.")
+        self._mode = "idle"
+        self._check_can_spin()
+
+    # ── Pod-Boni ───────────────────────────────────────────────────────────────
+    def _award_pod_bonus(self, pod_idx: int) -> None:
+        """Vergibt den Bonus eines gefüllten Pods."""
+        bet = BET_LEVELS[self._bet_idx]
+
+        if pod_idx == 0:
+            # 👑 Herzkönigin: 3 Karten-Picks → bester Gewinn
+            picks = sorted(
+                [random.randint(bet * 3, bet * 30) for _ in range(3)],
+                reverse=True
+            )
+            win = picks[0]
+            self._credits += win
+            self._res_lbl.setText(
+                f"👑  Herzkönigin-Bonus!  Karten: {picks}  →  +{win} Credits!"
+            )
+
+        elif pod_idx == 1:
+            # 🔵 Wunderland: Free Games
+            bonus_fs = _FS_BASE if self._fs_left == 0 else _FS_RETRIG
+            if self._fs_left > 0:
+                self._fs_left += bonus_fs
+                self._mode_lbl.setText(
+                    f"👸  FREE GAMES  ·  +{bonus_fs} Spins  "
+                    f"·  {self._fs_left} verbleibend  ·  {_FS_MULT}×"
+                )
+            else:
+                self._fs_total = bonus_fs
+                self._fs_left  = bonus_fs
+                self._sticky_wilds.clear()
+                self._mode_lbl.setText(
+                    f"👸  FREE GAMES!  {bonus_fs} Spins  ·  {_FS_MULT}× Multiplikator"
+                )
+                self._mode_lbl.show()
+                QTimer.singleShot(1200, self._run_freespin)
+            self._res_lbl.setText(f"🔵  Wunderland-Bonus!  +{bonus_fs} Free Games!")
+
+        elif pod_idx == 2:
+            # ⭐ Goldschatz: Jackpot-Rad
+            tiers   = [bet * 10, bet * 20, bet * 50, bet * 100, bet * 200]
+            weights = [40, 28, 18, 10, 4]
+            win = random.choices(tiers, weights=weights, k=1)[0]
+            self._credits += win
+            self._res_lbl.setText(f"⭐  Goldschatz-Jackpot!  +{win} Credits!  🎡")
+
+        self._update_credits()
 
     # ── Draggable ──────────────────────────────────────────────────────────────
     def mousePressEvent(self, e) -> None:
@@ -721,4 +1154,3 @@ class SlotMachineDialog(QDialog):
         for t in self._stop_timers:
             t.stop()
         super().closeEvent(e)
-
