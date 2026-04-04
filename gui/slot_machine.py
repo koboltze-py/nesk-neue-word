@@ -392,6 +392,8 @@ class _Reel(QWidget):
         self.held:    bool         = False
         self._ht:     float        = 0.0
         self._ball_vals: list[int | None] = [None, None, None]
+        self.sweat:   bool         = False   # Sweat-Walze (Free Games)
+        self._sw:     float        = 0.0    # Animations-Phase
 
     # ── Sichtbare Symbole ──────────────────────────────────────────────────────
     def visible_symbols(self) -> list[int]:
@@ -550,14 +552,30 @@ class _Reel(QWidget):
                        Qt.AlignmentFlag.AlignHCenter, "HOLD")
             p.setOpacity(1.0)
 
+        # SWEAT-Glut – Feuer-Überlagerung auf der ausgewählten Walze
+        if self.sweat:
+            sw_pulse = 0.5 + 0.5 * math.sin(self._sw)
+            fg = QLinearGradient(0, 0, 0, H)
+            fg.setColorAt(0.0, QColor(255, 107, 0, int(sw_pulse * 95)))
+            fg.setColorAt(0.5, QColor(255, 180, 0, int(sw_pulse * 38)))
+            fg.setColorAt(1.0, QColor(255, 107, 0, int(sw_pulse * 95)))
+            p.setOpacity(1.0)
+            p.fillRect(0, 0, W, H, QBrush(fg))
+            p.setOpacity(1.0)
+
         # Gewinnlinien-Ticks
         p.setPen(QPen(QColor(201, 162, 39, 60), 1, Qt.PenStyle.DotLine))
         for row in range(1, _ROWS):
             p.drawLine(0, row * SH, W, row * SH)
 
         # Rahmen
-        p.setPen(QPen(QColor("#c9a227") if self.held else QColor("#6c3483"),
-                      3 if self.held else 2))
+        if self.sweat:
+            sw_p = 0.5 + 0.5 * math.sin(self._sw)
+            p.setPen(QPen(QColor(255, int(107 + sw_p * 80), 0, 230), 3.5))
+        elif self.held:
+            p.setPen(QPen(QColor("#c9a227"), 3))
+        else:
+            p.setPen(QPen(QColor("#6c3483"), 2))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 7, 7)
         p.end()
@@ -890,6 +908,11 @@ class SlotMachineDialog(QDialog):
         if self._overlay:
             self._overlay.show_anim(text, color)
 
+    def _do_sweat(self, reel: "_Reel") -> None:
+        """Markiert Sweat-Walze + zeigt Spannungs-Animation."""
+        reel.sweat = True
+        self._show_win_anim("🌡  SWEAT!", "#ff6b00")
+
     def _grid(self) -> list[list[int]]:
         return [r.visible_symbols() for r in self._reels]
 
@@ -1199,28 +1222,59 @@ class SlotMachineDialog(QDialog):
 
         self._fs_left -= 1
 
-        # Ergebnisse erzeugen: Sticky Wilds beibehalten + leicht erhöhte Wild-Chance
+        # Sweat: ~22% Chance – eine zufällige Walze spinnt als letzte
+        # und enthüllt eine volle Wild-Walze
+        sweat_ri = -1
+        if random.random() < 0.22:
+            sweat_ri = random.randrange(_REELS)
+
+        # Ergebnisse erzeugen: Sticky Wilds + erhöhte Wild-Chance
         results = []
         for ri in range(_REELS):
-            col = _spin_col(self._bet_idx, extra_ball=0.02)
-            for row in range(_ROWS):
-                if (ri, row) in self._sticky_wilds:
-                    col[row] = WILD_IDX
-                elif col[row] not in (ALICE_IDX,) and random.random() < 0.05:
-                    col[row] = WILD_IDX
+            if ri == sweat_ri:
+                col = [WILD_IDX, WILD_IDX, WILD_IDX]   # Sweat → volle Wild-Walze
+            else:
+                col = _spin_col(self._bet_idx, extra_ball=0.02)
+                for row in range(_ROWS):
+                    if (ri, row) in self._sticky_wilds:
+                        col[row] = WILD_IDX
+                    elif col[row] not in (ALICE_IDX,) and random.random() < 0.05:
+                        col[row] = WILD_IDX
             results.append(col)
 
         for r in self._reels:
+            r.sweat = False
             r.start()
 
         self._mode = "freespinning"
 
+        # Normale Walzen stoppen (Sweat-Walze ausgelassen → kommt dramatisch als letzte)
         for idx, (reel, syms) in enumerate(zip(self._reels, results)):
+            if idx == sweat_ri:
+                continue
             t = QTimer(self)
             t.setSingleShot(True)
             t.timeout.connect(lambda r=reel, s=syms: r.schedule_stop(s))
             t.start(260 + idx * 200)
             self._stop_timers.append(t)
+
+        if sweat_ri >= 0:
+            # Sweat-Walze stoppt 1000ms nach der letzten normalen
+            last_normal_ms = 260 + (_REELS - 1) * 200
+            sweat_stop_ms  = last_normal_ms + 1000
+            sr = self._reels[sweat_ri]
+            ss = results[sweat_ri]
+            # 600ms vor Stopp: Feuer-Animation + Overlay
+            QTimer.singleShot(sweat_stop_ms - 600,
+                             lambda r=sr: self._do_sweat(r))
+            t_sw = QTimer(self)
+            t_sw.setSingleShot(True)
+            t_sw.timeout.connect(lambda r=sr, s=ss: r.schedule_stop(s))
+            t_sw.start(sweat_stop_ms)
+            self._stop_timers.append(t_sw)
+            # Sweat-Flag nach dem Stopp löschen
+            QTimer.singleShot(sweat_stop_ms + 1200,
+                             lambda r=sr: setattr(r, 'sweat', False))
 
         self._mode_lbl.setText(
             f"👸  FREE GAMES  ·  {self._fs_left + 1}/{self._fs_total}  "
