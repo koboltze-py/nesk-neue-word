@@ -67,7 +67,7 @@ _BV_MUL  = [1,  2,  3,  5,  8, 15, 25, 50]
 _BV_WGT  = [52, 26, 12,  6,  3,  2,  1,  1]
 
 # Holding Spin
-_HOLD_TRIGGER = 5
+_HOLD_TRIGGER = 3    # Bälle auf mindestens 3 Walzen → Holding Spin (~1:80 Spins)
 _HOLD_RESPINS = 5
 
 # Free Games
@@ -93,7 +93,7 @@ def _ball_val(bet: int) -> int:
 
 
 def _ball_prob(bet_idx: int) -> float:
-    return 0.04 + bet_idx * 0.006
+    return 0.10 + bet_idx * 0.012
 
 
 def _spin_col(bet_idx: int, extra_ball: float = 0.0) -> list[int]:
@@ -785,7 +785,7 @@ class SlotMachineDialog(QDialog):
                 row.addWidget(lb)
             iv.addLayout(row)
         note = QLabel(
-            "🔴🔵⭐ Bonusbälle → Pods  ·  5+ Bälle → Holding Spin (5 Respins)  ·  "
+            "🔴🔵⭐ Bonusbälle → Pods  ·  3+ Bälle → Holding Spin (5 Respins)  ·  "
             "3×👸 → 10 Free Games  ·  Pods voll → Bonus"
         )
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
