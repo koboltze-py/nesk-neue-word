@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtGui import QFont, QColor
 
 from config import FIORI_BLUE, FIORI_TEXT, BASE_DIR, FIORI_BORDER
+from gui.sanmat.main_widget import SanmatWidget as _SanmatWidget
 
 try:
     from database.sanmat_db import SanmatDB as _SanmatDB
@@ -4262,6 +4263,9 @@ class DienstlichesWidget(QWidget):
 
         self._uebersicht_tab = _UebersichtTab()
         self._tabs.addTab(self._uebersicht_tab, "📊  Übersicht")
+
+        self._sanmat_tab = _SanmatWidget()
+        self._tabs.addTab(self._sanmat_tab, "🩺  Sanitätsmaterial")
 
         self._tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tabs, 1)
