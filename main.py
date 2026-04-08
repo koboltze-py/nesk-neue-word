@@ -263,12 +263,12 @@ def main():
             color: #000000;
         }
         QToolTip {
-            color: #ffffff;
-            background-color: #1b3a5c;
-            border: 1px solid #4a6480;
+            color: #1b3a5c;
+            background-color: #fffde7;
+            border: 1px solid #90a4ae;
             border-radius: 4px;
-            font-size: 9pt;
-            padding: 4px 8px;
+            font-size: 9.5pt;
+            padding: 5px 10px;
         }
     """)
 

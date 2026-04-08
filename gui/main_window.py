@@ -167,6 +167,7 @@ from gui.uebergabe        import UebergabeWidget
 from gui.fahrzeuge        import FahrzeugeWidget
 from gui.einstellungen    import EinstellungenWidget
 from gui.code19           import Code19Widget
+from gui.bericht          import BerichtWidget
 from gui.mitarbeiter            import MitarbeiterHauptWidget
 from gui.hilfe_dialog           import HilfeDialog
 from gui.dienstliches           import DienstlichesWidget
@@ -185,11 +186,12 @@ NAV_ITEMS = [
     ("📋", "Übergabe",            5),
     ("🚗", "Fahrzeuge",           6),
     ("🕐", "Code 19",            7),
-    ("✈️",  "Passagiere",        8),
-    ("📞", "Telefonnummern",      9),
-    ("♿", "Call Transcription",  10),
-    ("💾", "Backup",             11),
-    ("⚙️",  "Einstellungen",    12),
+    ("📊", "Bericht",             8),
+    ("✈️",  "Passagiere",        9),
+    ("📞", "Telefonnummern",     10),
+    ("♿", "Call Transcription",  11),
+    ("💾", "Backup",             12),
+    ("⚙️",  "Einstellungen",    13),
 ]
 
 NAV_TOOLTIPS = [
@@ -201,6 +203,7 @@ NAV_TOOLTIPS = [
     "Schichtprotokoll erstellen, ausfüllen und abschließen",
     "Fahrzeugstatus, Schäden und Wartungstermine verwalten",
     "Code-19-Protokoll führen und Uhrzeigen-Animation",
+    "Kombinierten Bericht aus Verspätungen, Schulungen, Einsätzen und Patienten als Excel exportieren oder per E-Mail senden",
     "Passagieranfragen verarbeiten und Beschwerden erfassen und verwalten",
     "Telefonnummern-Verzeichnis: FKB Gate-/Check-In-Nummern und DRK-Kontakte",
     "Anrufprotokoll: Anrufinhalte mit Textbausteinen schnell erfassen und verwalten",
@@ -392,6 +395,7 @@ class MainWindow(QMainWindow):
         self._uebergabe_page         = UebergabeWidget()
         self._fahrzeuge_page         = FahrzeugeWidget()
         self._code19_page            = Code19Widget()
+        self._bericht_page           = BerichtWidget()
         self._telefonnummern_page    = TelefonnummernWidget()
         self._call_transcription_page = CallTranscriptionWidget()
         self._backup_page            = BackupWidget()
@@ -402,6 +406,7 @@ class MainWindow(QMainWindow):
                      self._aufgaben_haupt_page,
                      self._dienstplan_page, self._uebergabe_page,
                      self._fahrzeuge_page, self._code19_page,
+                     self._bericht_page,
                      self._passagiere_page,
                      self._telefonnummern_page,
                      self._call_transcription_page,

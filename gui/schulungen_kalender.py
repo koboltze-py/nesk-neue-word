@@ -174,7 +174,7 @@ class _TagZelle(QFrame):
         lbl = QLabel(text)
         # Vorwarnungen etwas transparenter (gestrichelt wäre ideal, aber QLabel-Grenzen)
         stil = (f"QLabel{{background:{bg};color:{fg};border-radius:3px;"
-                f"font-size:9px;padding:1px 2px;"
+                f"font-size:10px;font-weight:bold;padding:1px 3px;"
                 + ("border:1px dashed " + fg + ";" if vorwarnung else "")
                 + "}")
         lbl.setStyleSheet(stil)
@@ -304,9 +304,10 @@ class _TagesDetailDialog(QDialog):
                 e.get("gueltig_bis", ""),
                 e.get("status", ""),
             ]
+            pastel = _ZELL_BG.get(dring, "#ffffff")
             for col, text in enumerate(daten):
                 item = QTableWidgetItem(text)
-                item.setBackground(QColor(bg + "44"))
+                item.setBackground(QColor(pastel))
                 tbl.setItem(row, col, item)
         v.addWidget(tbl)
 

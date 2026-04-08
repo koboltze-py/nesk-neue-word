@@ -1,0 +1,763 @@
+"""
+Bericht-Widget – kombinierter Excel-Export und E-Mail-Versand
+Erstellt eine Excel-Datei mit bis zu 4 Abschnitten:
+  • Verspätungen
+  • Schulungen
+  • Einsätze
+  • Pat. auf Station
+"""
+from __future__ import annotations
+
+import os
+from datetime import date, datetime
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QGroupBox, QCheckBox, QDateEdit, QFormLayout, QFrame,
+    QScrollArea, QSizePolicy, QFileDialog, QMessageBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
+    QTextEdit, QDialogButtonBox, QDialog,
+)
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QFont, QColor
+
+from config import BASE_DIR, FIORI_BLUE, FIORI_TEXT
+
+_BERICHT_DIR = os.path.join(BASE_DIR, "Daten", "Berichte")
+
+# ─── Farben ───────────────────────────────────────────────────────────────────
+_FARBEN = {
+    "verspaetungen": ("#1565a8", "#e3f0ff"),
+    "schulungen":    ("#6a1b9a", "#f3e5f5"),
+    "einsaetze":     ("#2e7d32", "#e8f5e9"),
+    "patienten":     ("#b71c1c", "#ffebee"),
+}
+
+# ─── Hilfs-Buttons ────────────────────────────────────────────────────────────
+def _btn(text: str, color: str = FIORI_BLUE, hover: str = "#0057b8") -> QPushButton:
+    b = QPushButton(text)
+    b.setFixedHeight(34)
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    b.setStyleSheet(
+        f"QPushButton{{background:{color};color:#fff;border:none;"
+        f"border-radius:4px;padding:4px 14px;font-size:12px;}}"
+        f"QPushButton:hover{{background:{hover};}}"
+        f"QPushButton:disabled{{background:#bbb;color:#888;}}"
+    )
+    return b
+
+
+def _btn_light(text: str) -> QPushButton:
+    b = QPushButton(text)
+    b.setFixedHeight(34)
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    b.setStyleSheet(
+        "QPushButton{background:#eee;color:#333;border:1px solid #ccc;"
+        "border-radius:4px;padding:4px 14px;font-size:12px;}"
+        "QPushButton:hover{background:#ddd;}"
+        "QPushButton:disabled{background:#f5f5f5;color:#aaa;}"
+    )
+    return b
+
+
+# ─── Datum-Filter ─────────────────────────────────────────────────────────────
+def _filter_nach_datum(eintraege: list[dict], von: date, bis: date) -> list[dict]:
+    """Filtert Einträge mit datum='dd.MM.yyyy' auf den Bereich [von, bis]."""
+    result = []
+    for e in eintraege:
+        try:
+            d, m, y = e.get("datum", "").split(".")
+            entry_date = date(int(y), int(m), int(d))
+            if von <= entry_date <= bis:
+                result.append(e)
+        except Exception:
+            pass
+    return result
+
+
+# ─── Abschnitts-Kontrollpanel ─────────────────────────────────────────────────
+class _AbschnittPanel(QGroupBox):
+    """Ein aufklappbares Panel für einen Bericht-Abschnitt."""
+
+    def __init__(self, titel: str, farbe_ak: str, farbe_bg: str, parent=None):
+        super().__init__(parent)
+        self._farbe_ak = farbe_ak
+        self._farbe_bg = farbe_bg
+        self._build_ui(titel)
+
+    def _build_ui(self, titel: str):
+        self.setCheckable(True)
+        self.setChecked(True)
+        self.setTitle(f"  {titel}")
+        self.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid {self._farbe_ak};
+                border-radius: 6px;
+                margin-top: 10px;
+                background: {self._farbe_bg};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 2px 8px;
+                color: {self._farbe_ak};
+                font-weight: bold;
+            }}
+            QGroupBox:disabled {{ background: #f0f0f0; }}
+        """)
+
+        layout = QFormLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 14, 12, 10)
+
+        _field_style = (
+            "QDateEdit{border:1px solid #ccc;border-radius:4px;"
+            "padding:3px;font-size:12px;background:white;}"
+        )
+
+        heute = date.today()
+        von_default = QDate(heute.year, heute.month, 1)
+        bis_default = QDate.currentDate()
+
+        self._von = QDateEdit()
+        self._von.setCalendarPopup(True)
+        self._von.setDisplayFormat("dd.MM.yyyy")
+        self._von.setDate(von_default)
+        self._von.setStyleSheet(_field_style)
+        layout.addRow("Von:", self._von)
+
+        self._bis = QDateEdit()
+        self._bis.setCalendarPopup(True)
+        self._bis.setDisplayFormat("dd.MM.yyyy")
+        self._bis.setDate(bis_default)
+        self._bis.setStyleSheet(_field_style)
+        layout.addRow("Bis:", self._bis)
+
+    def aktiv(self) -> bool:
+        return self.isChecked()
+
+    def von_datum(self) -> date:
+        q = self._von.date()
+        return date(q.year(), q.month(), q.day())
+
+    def bis_datum(self) -> date:
+        q = self._bis.date()
+        return date(q.year(), q.month(), q.day())
+
+    def zeitraum_label(self) -> str:
+        return (f"{self._von.date().toString('dd.MM.yyyy')} – "
+                f"{self._bis.date().toString('dd.MM.yyyy')}")
+
+
+# ─── Vorschau-Widget ──────────────────────────────────────────────────────────
+class _Vorschau(QWidget):
+    """Rechte Seite: Zeigt Zusammenfassung der geplanten Abschnitte."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(8)
+
+        titel = QLabel("📋  Vorschau")
+        titel.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        titel.setStyleSheet(f"color:{FIORI_TEXT};")
+        v.addWidget(titel)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color:#ddd;")
+        v.addWidget(line)
+
+        self._tbl = QTableWidget()
+        self._tbl.setColumnCount(4)
+        self._tbl.setHorizontalHeaderLabels(["Abschnitt", "Zeitraum", "Einträge", "Status"])
+        self._tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._tbl.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        hh = self._tbl.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._tbl.verticalHeader().setVisible(False)
+        self._tbl.setAlternatingRowColors(True)
+        self._tbl.setStyleSheet("font-size:12px;")
+        v.addWidget(self._tbl)
+
+        self._info_lbl = QLabel()
+        self._info_lbl.setWordWrap(True)
+        self._info_lbl.setStyleSheet(
+            "background:#e3f2fd;color:#154360;border-radius:4px;"
+            "padding:8px 12px;font-size:11px;"
+        )
+        v.addWidget(self._info_lbl)
+
+    def aktualisieren(self, abschnitte: list[dict]):
+        """abschnitte: [{"name", "zeitraum", "count", "aktiv", "farbe"}]"""
+        self._tbl.setRowCount(len(abschnitte))
+        gesamt = 0
+        aktiv_count = 0
+        for row, a in enumerate(abschnitte):
+            items = [
+                QTableWidgetItem(a["name"]),
+                QTableWidgetItem(a["zeitraum"] if a["aktiv"] else "–"),
+                QTableWidgetItem(str(a["count"]) if a["aktiv"] else "–"),
+                QTableWidgetItem("✅ Aktiv" if a["aktiv"] else "⬜ Deaktiviert"),
+            ]
+            farbe = QColor(a.get("farbe_bg", "#ffffff"))
+            for col, item in enumerate(items):
+                item.setBackground(farbe if a["aktiv"] else QColor("#f5f5f5"))
+                self._tbl.setItem(row, col, item)
+            if a["aktiv"]:
+                gesamt += a["count"]
+                aktiv_count += 1
+
+        if aktiv_count == 0:
+            self._info_lbl.setText("⚠  Kein Abschnitt aktiviert. Bitte mindestens einen Abschnitt auswählen.")
+            self._info_lbl.setStyleSheet(
+                "background:#fff3e0;color:#6d3b00;border-radius:4px;padding:8px 12px;font-size:11px;"
+            )
+        else:
+            self._info_lbl.setText(
+                f"📊  {aktiv_count} Abschnitt(e) aktiv  ·  {gesamt} Einträge gesamt  "
+                f"·  Excel wird mit {aktiv_count} Tabellenblatt(-blättern) erstellt."
+            )
+            self._info_lbl.setStyleSheet(
+                "background:#e3f2fd;color:#154360;border-radius:4px;padding:8px 12px;font-size:11px;"
+            )
+
+
+# ─── Mail-Dialog ──────────────────────────────────────────────────────────────
+class _BerichtMailDialog(QDialog):
+    """Einfacher Mail-Dialog für den Bericht-Export."""
+
+    _FIELD = (
+        "QLineEdit,QTextEdit{border:1px solid #ccc;border-radius:4px;"
+        "padding:4px;font-size:12px;background:white;}"
+    )
+
+    def __init__(self, excel_pfad: str, abschnitte_namen: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📧  Bericht per E-Mail senden")
+        self.setMinimumWidth(500)
+        self.resize(550, 420)
+        layout = QVBoxLayout(self)
+        fl = QFormLayout()
+        fl.setSpacing(8)
+
+        self._empfaenger = QLineEdit("erste-hilfe-station-flughafen@drk-koeln.de")
+        self._empfaenger.setStyleSheet(self._FIELD)
+        fl.addRow("Empfänger:", self._empfaenger)
+
+        heute = datetime.now().strftime("%d.%m.%Y")
+        abschnitte_txt = ", ".join(abschnitte_namen)
+        self._betreff = QLineEdit(f"DRK FKB – Bericht {heute}  ({abschnitte_txt})")
+        self._betreff.setStyleSheet(self._FIELD)
+        fl.addRow("Betreff:", self._betreff)
+
+        layout.addLayout(fl)
+        layout.addWidget(QLabel("Nachrichtentext:"))
+
+        self._body = QTextEdit()
+        self._body.setStyleSheet(self._FIELD)
+        self._body.setPlainText(
+            f"Hallo,\n\n"
+            f"anbei der aktuelle Bericht der DRK-Station FKB ({abschnitte_txt}).\n\n"
+            f"Der Bericht ist als Excel-Datei angehängt.\n\n"
+            f"Mit freundlichen Grüßen\n"
+            f"DRK-Kreisverband Köln e.V."
+        )
+        self._body.setMinimumHeight(120)
+        layout.addWidget(self._body, 1)
+
+        anhang_lbl = QLabel(f"📎  Anhang: {os.path.basename(excel_pfad)}")
+        anhang_lbl.setStyleSheet(
+            "background:#e3f2fd;color:#154360;border-radius:4px;padding:6px 10px;font-size:11px;"
+        )
+        layout.addWidget(anhang_lbl)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("📧  Outlook-Entwurf öffnen")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def get_daten(self) -> tuple[str, str, str]:
+        return (
+            self._empfaenger.text().strip(),
+            self._betreff.text().strip(),
+            self._body.toPlainText().strip(),
+        )
+
+
+# ─── Excel-Erstellung ─────────────────────────────────────────────────────────
+def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
+    """
+    Schreibt bis zu 4 Abschnitte als Tabellenblätter in eine Excel-Datei.
+    abschnitte: [{"typ": str, "titel": str, "eintraege": list, "zeitraum": str}]
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    hdr_font  = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    center    = Alignment(horizontal="center", vertical="center")
+    left      = Alignment(horizontal="left",   vertical="center")
+    thin      = Border(
+        left=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),
+        bottom=Side(style="thin", color="CCCCCC"),
+    )
+
+    wb = openpyxl.Workbook()
+    # Erstes leeres Blatt entfernen
+    ws_dummy = wb.active
+
+    def _hdr_fill(hex_color: str):
+        return PatternFill("solid", fgColor=hex_color.lstrip("#"))
+
+    def _data_fill(hex_color: str, alpha: str = "22"):
+        """Helles Tabellenblatt-Hintergrundfarbe aus der Abschnittsfarbe."""
+        return PatternFill("solid", fgColor=hex_color.lstrip("#"))
+
+    def _schreibe_sheet(ws, spalten: list[tuple[str, int]], zeilen: list[list],
+                        hdr_color: str, zebra1: str, zebra2: str,
+                        titel_zeile: str | None = None, zeitraum: str = ""):
+        """Schreibt Kopfzeile + Daten in ws."""
+        row_start = 1
+        if titel_zeile:
+            ws.merge_cells(f"A1:{get_column_letter(len(spalten))}1")
+            c = ws.cell(row=1, column=1, value=titel_zeile)
+            c.font = Font(bold=True, size=13, color="FFFFFF")
+            c.fill = _hdr_fill(hdr_color)
+            c.alignment = center
+            ws.row_dimensions[1].height = 24
+            row_start = 2
+            if zeitraum:
+                ws.merge_cells(f"A2:{get_column_letter(len(spalten))}2")
+                s = ws.cell(row=2, column=1, value=f"Zeitraum: {zeitraum}    |    Erstellt: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+                s.font = Font(italic=True, size=9, color="555555")
+                s.alignment = center
+                ws.row_dimensions[2].height = 14
+                row_start = 3
+
+        hdr_row = row_start
+        for col_idx, (name, breite) in enumerate(spalten, 1):
+            c = ws.cell(row=hdr_row, column=col_idx, value=name)
+            c.font = hdr_font
+            c.fill = _hdr_fill(hdr_color)
+            c.alignment = center
+            c.border = thin
+            ws.column_dimensions[get_column_letter(col_idx)].width = breite
+        ws.row_dimensions[hdr_row].height = 22
+        ws.auto_filter.ref = f"A{hdr_row}:{get_column_letter(len(spalten))}{hdr_row}"
+
+        f1 = PatternFill("solid", fgColor=zebra1)
+        f2 = PatternFill("solid", fgColor=zebra2)
+        for r_offset, zeile in enumerate(zeilen):
+            row_num = hdr_row + 1 + r_offset
+            fill = f1 if r_offset % 2 == 0 else f2
+            for col_idx, wert in enumerate(zeile, 1):
+                c = ws.cell(row=row_num, column=col_idx, value=wert)
+                c.fill = fill
+                c.border = thin
+                c.alignment = center if col_idx <= 3 else left
+            ws.row_dimensions[row_num].height = 17
+
+        # Frieren ab Datenzeile
+        ws.freeze_panes = f"A{hdr_row + 1}"
+
+    for ab in abschnitte:
+        typ      = ab["typ"]
+        eintr    = ab["eintraege"]
+        zeitraum = ab.get("zeitraum", "")
+        n        = len(eintr)
+
+        # ── Verspätungen ────────────────────────────────────────────────────
+        if typ == "verspaetungen":
+            ws = wb.create_sheet("Verspätungen")
+            spalten = [
+                ("Datum", 13), ("Mitarbeiter", 26), ("Dienst", 10),
+                ("Dienstbeginn", 13), ("Dienstantritt", 14), ("Verspätung", 14),
+                ("Aufgen. von", 18), ("Begründung", 38),
+            ]
+            zeilen = []
+            for e in eintr:
+                vmin = e.get("verspaetung_min") or 0
+                versp = f"{vmin} Min. zu spät" if vmin > 0 else (f"{abs(vmin)} Min. früh" if vmin < 0 else "Pünktlich")
+                zeilen.append([
+                    e.get("datum", ""), e.get("mitarbeiter", ""), e.get("dienst", ""),
+                    e.get("dienstbeginn", ""), e.get("dienstantritt", ""), versp,
+                    e.get("aufgenommen_von", ""), e.get("begruendung", ""),
+                ])
+            _schreibe_sheet(ws, spalten, zeilen, "1565A8", "FFFFFF", "F5F5F5",
+                            f"⏰  Verspätungen ({n} Einträge)", zeitraum)
+
+        # ── Schulungen ──────────────────────────────────────────────────────
+        elif typ == "schulungen":
+            from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+            ws = wb.create_sheet("Schulungen")
+            spalten = [
+                ("Mitarbeiter", 26), ("Schulungsart", 22), ("Gültig bis", 13),
+                ("Tage Rest", 11), ("Status", 12),
+            ]
+            zeilen = []
+            heute = date.today()
+            for e in eintr:
+                cfg      = SCHULUNGSTYPEN_CFG.get(e.get("schulungstyp", ""), {})
+                anzeige  = cfg.get("anzeige", e.get("schulungstyp", ""))
+                name     = f"{e.get('nachname', '')} {e.get('vorname', '')}".strip()
+                gb       = e.get("gueltig_bis", "")
+                try:
+                    d, m, y = gb.split(".")
+                    gb_date = date(int(y), int(m), int(d))
+                    tage_rest = (gb_date - heute).days
+                    tage_txt = f"{tage_rest}" if tage_rest >= 0 else f"ÜBERFÄLLIG {-tage_rest}d"
+                except Exception:
+                    tage_txt = ""
+                zeilen.append([name, anzeige, gb, tage_txt, e.get("status", "gültig")])
+            _schreibe_sheet(ws, spalten, zeilen, "6A1B9A", "FFFFFF", "F5F5F5",
+                            f"🎓  Schulungen ({n} Einträge)", zeitraum)
+
+        # ── Einsätze ────────────────────────────────────────────────────────
+        elif typ == "einsaetze":
+            ws = wb.create_sheet("Einsätze")
+            spalten = [
+                ("Nr.", 5), ("Datum", 11), ("Uhrzeit", 9), ("Dauer\n(Min.)", 10),
+                ("Stichwort", 20), ("Ort", 20), ("DRK-Nr.", 12),
+                ("MA 1", 18), ("MA 2", 18), ("Angenom.", 10), ("Bemerkung", 30),
+            ]
+            zeilen = []
+            for idx, e in enumerate(eintr, 1):
+                zeilen.append([
+                    idx, e.get("datum", ""), e.get("uhrzeit", ""),
+                    e.get("einsatzdauer", "") or "",
+                    e.get("einsatzstichwort", ""), e.get("einsatzort", ""),
+                    e.get("einsatznr_drk", ""), e.get("drk_ma1", ""), e.get("drk_ma2", ""),
+                    "Ja" if e.get("angenommen", 1) else "Nein",
+                    e.get("bemerkung", ""),
+                ])
+            _schreibe_sheet(ws, spalten, zeilen, "2E7D32", "FFFFFF", "F5F5F5",
+                            f"🚑  Einsätze ({n} Einträge)", zeitraum)
+
+        # ── Patienten ───────────────────────────────────────────────────────
+        elif typ == "patienten":
+            ws = wb.create_sheet("Pat. Station")
+            spalten = [
+                ("Nr.", 5), ("Datum", 11), ("Uhrzeit", 9), ("Dauer\n(Min.)", 10),
+                ("Typ", 14), ("Alter", 7), ("Beschwerde", 22), ("Ort", 18),
+                ("Maßnahmen", 22), ("DRK MA 1", 16), ("Weitergeleitet", 14), ("BG-Fall", 8),
+            ]
+            zeilen = []
+            for idx, e in enumerate(eintr, 1):
+                zeilen.append([
+                    idx, e.get("datum", ""), e.get("uhrzeit", ""),
+                    e.get("behandlungsdauer", "") or "",
+                    e.get("patient_typ", "") or "",
+                    e.get("alter", "") or "",
+                    e.get("beschwerde_art", "") or "",
+                    e.get("unfall_ort", "") or "",
+                    e.get("massnahmen", "") or "",
+                    e.get("drk_ma1", "") or "",
+                    e.get("weitergeleitet", "") or "",
+                    "Ja" if e.get("arbeitsunfall") else "Nein",
+                ])
+            _schreibe_sheet(ws, spalten, zeilen, "B71C1C", "FFFFFF", "F5F5F5",
+                            f"🏥  Pat. auf Station ({n} Einträge)", zeitraum)
+
+    # Erstes Dummy-Blatt entfernen (nur wenn mindestens ein echter Sheet erstellt)
+    if len(wb.worksheets) > 1:
+        wb.remove(ws_dummy)
+    else:
+        # Fallback: kein Abschnitt hatte Daten – trotzdem speichern
+        ws_dummy.title = "Bericht"
+        ws_dummy.cell(row=1, column=1, value="Keine Daten im gewählten Zeitraum.")
+
+    os.makedirs(os.path.dirname(ziel_pfad), exist_ok=True)
+    wb.save(ziel_pfad)
+
+
+# ─── Haupt-Widget ─────────────────────────────────────────────────────────────
+class BerichtWidget(QWidget):
+    """Bericht-Seite: kombinierter Export aus mehreren Modulen."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_ui()
+        self._aktualisiere_vorschau()
+
+    # ── UI aufbauen ───────────────────────────────────────────────────────────
+    def _build_ui(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Titelleiste
+        titelbar = QFrame()
+        titelbar.setStyleSheet("background:#1565a8;")
+        titelbar.setFixedHeight(52)
+        tbl = QHBoxLayout(titelbar)
+        tbl.setContentsMargins(20, 0, 20, 0)
+        lbl = QLabel("📊  Bericht erstellen")
+        lbl.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        lbl.setStyleSheet("color:white;")
+        tbl.addWidget(lbl)
+        tbl.addStretch()
+        outer.addWidget(titelbar)
+
+        # Haupt-Bereich: Links Kontrollen, Rechts Vorschau
+        haupt = QHBoxLayout()
+        haupt.setContentsMargins(16, 12, 16, 12)
+        haupt.setSpacing(16)
+
+        # ── Linke Spalte: Abschnitt-Panels ──────────────────────────────────
+        linke_scroll = QScrollArea()
+        linke_scroll.setWidgetResizable(True)
+        linke_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        linke_scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
+        linke_scroll.setFixedWidth(310)
+
+        linke_seite = QWidget()
+        linke_layout = QVBoxLayout(linke_seite)
+        linke_layout.setContentsMargins(0, 0, 4, 0)
+        linke_layout.setSpacing(10)
+
+        linke_lbl = QLabel("Abschnitte auswählen:")
+        linke_lbl.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        linke_lbl.setStyleSheet(f"color:{FIORI_TEXT};")
+        linke_layout.addWidget(linke_lbl)
+
+        c = _FARBEN
+        self._panel_versp = _AbschnittPanel("⏰  Verspätungen",    c["verspaetungen"][0], c["verspaetungen"][1])
+        self._panel_schu  = _AbschnittPanel("🎓  Schulungen",       c["schulungen"][0],    c["schulungen"][1])
+        self._panel_eins  = _AbschnittPanel("🚑  Einsätze",         c["einsaetze"][0],     c["einsaetze"][1])
+        self._panel_pat   = _AbschnittPanel("🏥  Pat. auf Station", c["patienten"][0],     c["patienten"][1])
+
+        for panel in (self._panel_versp, self._panel_schu, self._panel_eins, self._panel_pat):
+            panel.toggled.connect(self._aktualisiere_vorschau)
+            panel._von.dateChanged.connect(self._aktualisiere_vorschau)
+            panel._bis.dateChanged.connect(self._aktualisiere_vorschau)
+            linke_layout.addWidget(panel)
+
+        linke_layout.addStretch()
+        linke_scroll.setWidget(linke_seite)
+        haupt.addWidget(linke_scroll)
+
+        # ── Rechte Spalte: Vorschau ──────────────────────────────────────────
+        rechte_seite = QWidget()
+        rechte_layout = QVBoxLayout(rechte_seite)
+        rechte_layout.setContentsMargins(0, 0, 0, 0)
+        rechte_layout.setSpacing(10)
+
+        self._vorschau = _Vorschau()
+        rechte_layout.addWidget(self._vorschau, 1)
+
+        # Aktions-Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self._btn_vorschau = _btn_light("🔄  Vorschau aktualisieren")
+        self._btn_vorschau.clicked.connect(self._aktualisiere_vorschau)
+        btn_row.addWidget(self._btn_vorschau)
+
+        btn_row.addStretch()
+
+        self._btn_export = _btn("📥  Excel exportieren", "#1565a8", "#0d47a1")
+        self._btn_export.setToolTip("Excel-Datei mit allen aktiven Abschnitten speichern")
+        self._btn_export.clicked.connect(self._excel_exportieren)
+        btn_row.addWidget(self._btn_export)
+
+        self._btn_mail = _btn("📧  Per E-Mail senden", "#6a1b9a", "#4a148c")
+        self._btn_mail.setToolTip("Excel erstellen und als Outlook-Entwurf versenden")
+        self._btn_mail.clicked.connect(self._per_mail_senden)
+        btn_row.addWidget(self._btn_mail)
+
+        rechte_layout.addLayout(btn_row)
+
+        haupt.addWidget(rechte_seite, 1)
+        outer.addLayout(haupt, 1)
+
+    # ── Daten laden ───────────────────────────────────────────────────────────
+    def _lade_abschnitte(self) -> list[dict]:
+        """Lädt Daten für alle aktiven Abschnitte und gibt sie zurück."""
+        abschnitte = []
+
+        if self._panel_versp.aktiv():
+            try:
+                from functions.verspaetung_db import lade_verspaetungen
+                alle = lade_verspaetungen()
+                gefiltert = _filter_nach_datum(alle, self._panel_versp.von_datum(), self._panel_versp.bis_datum())
+            except Exception:
+                gefiltert = []
+            abschnitte.append({
+                "typ": "verspaetungen", "titel": "Verspätungen",
+                "eintraege": gefiltert, "zeitraum": self._panel_versp.zeitraum_label(),
+                "farbe_ak": _FARBEN["verspaetungen"][0], "farbe_bg": _FARBEN["verspaetungen"][1],
+            })
+
+        if self._panel_schu.aktiv():
+            try:
+                from functions.schulungen_db import lade_eintraege_fuer_export
+                gefiltert = lade_eintraege_fuer_export(
+                    self._panel_schu.von_datum(),
+                    self._panel_schu.bis_datum(),
+                )
+            except Exception:
+                gefiltert = []
+            abschnitte.append({
+                "typ": "schulungen", "titel": "Schulungen",
+                "eintraege": gefiltert, "zeitraum": self._panel_schu.zeitraum_label(),
+                "farbe_ak": _FARBEN["schulungen"][0], "farbe_bg": _FARBEN["schulungen"][1],
+            })
+
+        if self._panel_eins.aktiv():
+            try:
+                from gui.dienstliches import lade_einsaetze
+                alle = lade_einsaetze()
+                gefiltert = _filter_nach_datum(alle, self._panel_eins.von_datum(), self._panel_eins.bis_datum())
+            except Exception:
+                gefiltert = []
+            abschnitte.append({
+                "typ": "einsaetze", "titel": "Einsätze",
+                "eintraege": gefiltert, "zeitraum": self._panel_eins.zeitraum_label(),
+                "farbe_ak": _FARBEN["einsaetze"][0], "farbe_bg": _FARBEN["einsaetze"][1],
+            })
+
+        if self._panel_pat.aktiv():
+            try:
+                from gui.dienstliches import lade_patienten
+                alle = lade_patienten()
+                gefiltert = _filter_nach_datum(alle, self._panel_pat.von_datum(), self._panel_pat.bis_datum())
+            except Exception:
+                gefiltert = []
+            abschnitte.append({
+                "typ": "patienten", "titel": "Pat. auf Station",
+                "eintraege": gefiltert, "zeitraum": self._panel_pat.zeitraum_label(),
+                "farbe_ak": _FARBEN["patienten"][0], "farbe_bg": _FARBEN["patienten"][1],
+            })
+
+        return abschnitte
+
+    # ── Vorschau aktualisieren ────────────────────────────────────────────────
+    def _aktualisiere_vorschau(self):
+        abschnitte = self._lade_abschnitte()
+        vorschau_daten = [
+            {
+                "name": a["titel"],
+                "zeitraum": a["zeitraum"],
+                "count": len(a["eintraege"]),
+                "aktiv": True,
+                "farbe_bg": a["farbe_bg"],
+            }
+            for a in abschnitte
+        ]
+        # Deaktivierte Abschnitte ebenfalls anzeigen
+        alle_typen = [
+            ("verspaetungen", "Verspätungen",    self._panel_versp),
+            ("schulungen",    "Schulungen",       self._panel_schu),
+            ("einsaetze",     "Einsätze",         self._panel_eins),
+            ("patienten",     "Pat. auf Station", self._panel_pat),
+        ]
+        for typ, titel, panel in alle_typen:
+            if not panel.aktiv():
+                vorschau_daten.append({
+                    "name": titel, "zeitraum": "–", "count": 0,
+                    "aktiv": False, "farbe_bg": "#f5f5f5",
+                })
+        # Sortieren nach ursprünglicher Reihenfolge
+        reihenfolge = ["verspaetungen", "schulungen", "einsaetze", "patienten"]
+        typ_zu_titel = {
+            "verspaetungen": "Verspätungen", "schulungen": "Schulungen",
+            "einsaetze": "Einsätze", "patienten": "Pat. auf Station"
+        }
+        vorschau_daten.sort(key=lambda x: reihenfolge.index(
+            next((k for k, v in typ_zu_titel.items() if v == x["name"]), "verspaetungen")
+        ))
+        self._vorschau.aktualisieren(vorschau_daten)
+
+    # ── Excel erstellen ───────────────────────────────────────────────────────
+    def _baue_ziel_pfad(self) -> str:
+        heute = datetime.now().strftime("%Y-%m-%d")
+        os.makedirs(_BERICHT_DIR, exist_ok=True)
+        return os.path.join(_BERICHT_DIR, f"Bericht_{heute}.xlsx")
+
+    def _excel_exportieren(self, ask_path: bool = True) -> str | None:
+        abschnitte = self._lade_abschnitte()
+        if not abschnitte:
+            QMessageBox.warning(self, "Keine Daten", "Bitte mindestens einen Abschnitt aktivieren.")
+            return None
+
+        ziel = self._baue_ziel_pfad()
+        if ask_path:
+            ziel, _ = QFileDialog.getSaveFileName(
+                self, "Bericht speichern", ziel, "Excel-Dateien (*.xlsx)"
+            )
+            if not ziel:
+                return None
+
+        try:
+            _erstelle_bericht_excel(abschnitte, ziel)
+        except ImportError as e:
+            QMessageBox.critical(self, "Modul fehlt", str(e))
+            return None
+        except Exception as exc:
+            QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Exportieren:\n{exc}")
+            return None
+
+        antwort = QMessageBox.question(
+            self, "Bericht gespeichert",
+            f"Bericht wurde gespeichert:\n\n{ziel}\n\nDatei jetzt öffnen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            import subprocess
+            subprocess.Popen(["explorer", ziel], shell=False)
+
+        return ziel
+
+    # ── Per E-Mail senden ─────────────────────────────────────────────────────
+    def _per_mail_senden(self):
+        abschnitte = self._lade_abschnitte()
+        if not abschnitte:
+            QMessageBox.warning(self, "Keine Daten", "Bitte mindestens einen Abschnitt aktivieren.")
+            return
+
+        # Excel ohne Datei-Dialog speichern
+        ziel = self._baue_ziel_pfad()
+        try:
+            _erstelle_bericht_excel(abschnitte, ziel)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Erstellen der Excel:\n{exc}")
+            return
+
+        namen = [a["titel"] for a in abschnitte]
+        dlg = _BerichtMailDialog(ziel, namen, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        empfaenger, betreff, body = dlg.get_daten()
+
+        try:
+            from functions.mail_functions import create_outlook_draft
+            logo = os.path.join(BASE_DIR, "Daten", "Email", "Logo.jpg")
+            create_outlook_draft(
+                to=empfaenger,
+                subject=betreff,
+                body_text=body,
+                attachment_path=ziel,
+                logo_path=logo if os.path.isfile(logo) else None,
+            )
+            QMessageBox.information(
+                self, "Outlook geöffnet",
+                "Der Outlook-Entwurf wurde geöffnet.\n"
+                "Bitte prüfen und manuell absenden."
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "E-Mail-Fehler",
+                f"Outlook-Entwurf konnte nicht erstellt werden:\n{exc}\n\n"
+                f"Die Excel-Datei wurde trotzdem gespeichert:\n{ziel}"
+            )

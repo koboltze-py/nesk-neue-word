@@ -15,9 +15,9 @@ from PySide6.QtWidgets import (
     QFormLayout, QLineEdit, QTextEdit, QComboBox, QDateEdit,
     QMessageBox, QFrame, QScrollArea, QSizePolicy, QInputDialog,
     QFileDialog, QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
-    QTimeEdit, QTabWidget, QSpinBox
+    QTimeEdit, QTabWidget, QSpinBox, QCompleter
 )
-from PySide6.QtCore import Qt, QDate, QSize, QTime
+from PySide6.QtCore import Qt, QDate, QSize, QTime, QStringListModel
 from PySide6.QtGui import QFont, QColor, QIcon
 
 from config import FIORI_BLUE, FIORI_TEXT, FIORI_WHITE, FIORI_BORDER, BASE_DIR
@@ -657,20 +657,27 @@ class _VerspaetungDialog(QDialog):
         self._ma_combo.setEditable(True)
         self._ma_combo.setMinimumWidth(260)
         self._ma_combo.lineEdit().setPlaceholderText("Name eingeben …")
+        self._ma_namen: list[str] = []
         try:
             from functions.mitarbeiter_functions import lade_mitarbeiter_namen
-            for name in lade_mitarbeiter_namen():
-                self._ma_combo.addItem(name)
+            self._ma_namen = lade_mitarbeiter_namen()
         except Exception:
             try:
                 from database.models import Mitarbeiter as _MA
                 from database.connection import get_session
                 with get_session() as s:
                     mas = s.query(_MA).filter(_MA.status == "aktiv").order_by(_MA.nachname).all()
-                    for m in mas:
-                        self._ma_combo.addItem(f"{m.nachname}, {m.vorname}")
+                    self._ma_namen = [f"{m.nachname}, {m.vorname}" for m in mas]
             except Exception:
                 pass
+        for name in self._ma_namen:
+            self._ma_combo.addItem(name)
+        # Completer: findet Namen egal ob Vorname oder Nachname vorn eingegeben wird
+        _completer = QCompleter(self._ma_namen, self._ma_combo)
+        _completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        _completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        _completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self._ma_combo.setCompleter(_completer)
         form.addRow("Mitarbeiter *:", self._ma_combo)
 
         # Datum
@@ -831,6 +838,24 @@ class _VerspaetungDialog(QDialog):
                 "font-weight:bold; color:#2d6a2d; font-size:13px; padding:2px 0;"
             )
 
+    def _normalise_ma_name(self, eingabe: str) -> str:
+        """Gibt den kanonischen 'Nachname, Vorname'-Eintrag zurück,
+        wenn die Eingabe (case-insensitiv) einem Listeneintrag entspricht.
+        Ansonsten wird die Originaleingabe unverändert zurückgegeben."""
+        low = eingabe.lower()
+        for name in self._ma_namen:
+            if name.lower() == low:
+                return name
+        # Auch "Vorname Nachname" akzeptieren und in Kanoniform umkehren
+        teile = eingabe.strip().split()
+        if len(teile) >= 2:
+            # Probiere "Vorname Nachname" -> "Nachname, Vorname"
+            umgekehrt = f"{teile[-1]}, {' '.join(teile[:-1])}"
+            for name in self._ma_namen:
+                if name.lower() == umgekehrt.lower():
+                    return name
+        return eingabe
+
     def _on_nur_speichern(self):
         ma = self._ma_combo.currentText().strip()
         if not ma:
@@ -883,7 +908,7 @@ class _VerspaetungDialog(QDialog):
         idx = self._dienst_combo.currentIndex()
         dienst_code = self._dienst_combo.itemData(idx) or "T"
         return {
-            "mitarbeiter":     self._ma_combo.currentText().strip(),
+            "mitarbeiter":     self._normalise_ma_name(self._ma_combo.currentText().strip()),
             "datum":           self._datum.date().toString("dd.MM.yyyy"),
             "dienst":          dienst_code,
             "dienstbeginn":    beginn_str,
