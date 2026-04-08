@@ -475,22 +475,33 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
                 ("Tage Rest", 11), ("Status", 12),
             ]
             zeilen = []
+            tage_werte: list[int | None] = []
             heute = date.today()
             for e in eintr:
                 cfg      = SCHULUNGSTYPEN_CFG.get(e.get("schulungstyp", ""), {})
                 anzeige  = cfg.get("anzeige", e.get("schulungstyp", ""))
                 name     = f"{e.get('nachname', '')} {e.get('vorname', '')}".strip()
                 gb       = e.get("gueltig_bis", "")
+                tage_rest_val: int | None = None
                 try:
                     d, m, y = gb.split(".")
                     gb_date = date(int(y), int(m), int(d))
-                    tage_rest = (gb_date - heute).days
-                    tage_txt = f"{tage_rest}" if tage_rest >= 0 else f"ÜBERFÄLLIG {-tage_rest}d"
+                    tage_rest_val = (gb_date - heute).days
+                    tage_txt = f"{tage_rest_val}" if tage_rest_val >= 0 else f"ÜBERFÄLLIG {-tage_rest_val}d"
                 except Exception:
                     tage_txt = ""
+                tage_werte.append(tage_rest_val)
                 zeilen.append([name, anzeige, gb, tage_txt, e.get("status", "gültig")])
             _schreibe_sheet(ws, spalten, zeilen, "6A1B9A", "FFFFFF", "F5F5F5",
                             f"🎓  Schulungen ({n} Einträge)", zeitraum)
+            # Spalte 4 (Tage Rest) < 48 Tage gelb hinterlegen
+            _fill_gelb  = PatternFill("solid", fgColor="FFFF00")
+            _fill_rot   = PatternFill("solid", fgColor="FFCDD2")
+            _daten_start = 4  # Zeile 1=Titel, 2=Zeitraum, 3=Header, ab 4 Daten
+            for r_off, tage_val in enumerate(tage_werte):
+                if tage_val is not None and tage_val < 48:
+                    cell = ws.cell(row=_daten_start + r_off, column=4)
+                    cell.fill = _fill_rot if tage_val < 0 else _fill_gelb
 
         # ── Einsätze ────────────────────────────────────────────────────────
         elif typ == "einsaetze":
