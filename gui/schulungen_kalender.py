@@ -16,7 +16,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, QSize, Signal
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QCursor
 
-from config import FIORI_BLUE
+import os
+
+from config import FIORI_BLUE, BASE_DIR as _SCHULUNG_BASE_DIR
+
+_SCHULUNG_EXPORT_DIR = os.path.join(_SCHULUNG_BASE_DIR, "Daten", "Schulungen")
 
 # ─── Farb-Konstanten ──────────────────────────────────────────────────────────
 _FARBEN = {
@@ -562,6 +566,336 @@ def _lade_typen():
         }
     except Exception:
         pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Schulungen-Excel-Export
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _schulungen_als_excel_speichern(eintraege: list, pfad: str) -> None:
+    """Speichert ablaufende Schulungseinträge als Excel-Datei (2 Blätter)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ablaufende Schulungen"
+
+    header_font  = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    header_fill  = PatternFill("solid", fgColor="1565A8")
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align   = Alignment(horizontal="left",   vertical="center")
+    thin_border  = Border(
+        left=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),
+        bottom=Side(style="thin", color="CCCCCC"),
+    )
+
+    spalten = [
+        ("Mitarbeiter",    28),
+        ("Schulungsart",   22),
+        ("Gültig bis",     14),
+        ("Tage",           10),
+        ("Status",         18),
+    ]
+    for col_idx, (titel, breite) in enumerate(spalten, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=titel)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = center_align
+        cell.border    = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = breite
+    ws.row_dimensions[1].height = 22
+
+    from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+    fill_rot   = PatternFill("solid", fgColor="FFCDD2")
+    fill_gelb  = PatternFill("solid", fgColor="FFF9C4")
+    fill_orange = PatternFill("solid", fgColor="FFE0B2")
+    fill_abgl  = PatternFill("solid", fgColor="FFEBEE")
+    fill_white = PatternFill("solid", fgColor="FFFFFF")
+    fill_alt   = PatternFill("solid", fgColor="F5F5F5")
+
+    for row_idx, e in enumerate(eintraege, start=2):
+        tage  = e.get("_tage_rest", 0)
+        dring = e.get("_dringlichkeit", "")
+        cfg   = SCHULUNGSTYPEN_CFG.get(e.get("schulungstyp", ""), {})
+        anzeige = cfg.get("anzeige", e.get("schulungstyp", ""))
+
+        if tage < 0:
+            tage_txt = f"ÜBERFÄLLIG {-tage}d"
+            row_fill = fill_abgl
+        elif tage <= 31:
+            tage_txt = f"{tage} Tage"
+            row_fill = fill_rot
+        elif tage <= 61:
+            tage_txt = f"{tage} Tage"
+            row_fill = fill_orange
+        elif tage <= 92:
+            tage_txt = f"{tage} Tage"
+            row_fill = fill_gelb
+        else:
+            tage_txt = f"{tage} Tage"
+            row_fill = fill_alt if row_idx % 2 == 0 else fill_white
+
+        status_txt = "Abgelaufen" if tage < 0 else "Gültig"
+
+        zeile = [
+            e.get("_name", ""),
+            anzeige,
+            e.get("gueltig_bis", ""),
+            tage_txt,
+            status_txt,
+        ]
+        for col_idx, wert in enumerate(zeile, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=wert)
+            cell.border    = thin_border
+            cell.fill      = row_fill
+            cell.alignment = left_align if col_idx in (1, 2) else center_align
+        ws.row_dimensions[row_idx].height = 17
+
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(spalten))}1"
+
+    # ── Übersichts-Blatt: Pro Mitarbeiter ─────────────────────────────────────
+    from collections import defaultdict
+    ws2 = wb.create_sheet("Übersicht je Mitarbeiter")
+
+    ma_gruppen: dict = defaultdict(list)
+    for e in eintraege:
+        ma_gruppen[e.get("_name", "Unbekannt")].append(e)
+
+    ü_spalten = [
+        ("Mitarbeiter",   28),
+        ("Schulungsart",  22),
+        ("Gültig bis",    14),
+        ("Tage",          10),
+        ("Status",        18),
+    ]
+    for col_idx, (titel, breite) in enumerate(ü_spalten, start=1):
+        cell = ws2.cell(row=1, column=col_idx, value=titel)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = center_align
+        cell.border    = thin_border
+        ws2.column_dimensions[get_column_letter(col_idx)].width = breite
+    ws2.row_dimensions[1].height = 22
+
+    row_idx = 2
+    for ma_name in sorted(ma_gruppen.keys()):
+        for e in sorted(ma_gruppen[ma_name], key=lambda x: x.get("gueltig_bis", "")):
+            tage  = e.get("_tage_rest", 0)
+            cfg   = SCHULUNGSTYPEN_CFG.get(e.get("schulungstyp", ""), {})
+            anzeige = cfg.get("anzeige", e.get("schulungstyp", ""))
+            tage_txt   = f"ÜBERFÄLLIG {-tage}d" if tage < 0 else f"{tage} Tage"
+            status_txt = "Abgelaufen" if tage < 0 else "Gültig"
+            zeile = [ma_name, anzeige, e.get("gueltig_bis", ""), tage_txt, status_txt]
+            row_fill = fill_abgl if tage < 0 else (
+                fill_rot if tage <= 31 else (
+                fill_orange if tage <= 61 else (
+                fill_gelb if tage <= 92 else (fill_alt if row_idx % 2 == 0 else fill_white)
+            )))
+            for col_idx, wert in enumerate(zeile, start=1):
+                cell = ws2.cell(row=row_idx, column=col_idx, value=wert)
+                cell.border    = thin_border
+                cell.fill      = row_fill
+                cell.alignment = left_align if col_idx in (1, 2) else center_align
+            ws2.row_dimensions[row_idx].height = 17
+            row_idx += 1
+
+    ws2.auto_filter.ref = f"A1:{get_column_letter(len(ü_spalten))}1"
+
+    os.makedirs(os.path.dirname(pfad), exist_ok=True)
+    wb.save(pfad)
+
+
+# ── Export-Dialog ─────────────────────────────────────────────────────────────
+class _SchulungExportDialog(QDialog):
+    """Dialog zur Auswahl von Schulungsarten, Zeitraum und Speicherpfad."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        self._typen_cfg = SCHULUNGSTYPEN_CFG
+        self.setWindowTitle("📊 Excel-Export – Ablaufende Schulungen")
+        self.setMinimumWidth(560)
+        self._build_ui()
+
+    def _build_ui(self):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+
+        # ── Schulungsarten ────────────────────────────────────────────────────
+        grp_art = QGroupBox("Schulungsarten")
+        grp_art.setStyleSheet(
+            "QGroupBox{font-weight:bold;border:1px solid #a5d6a7;"
+            "border-radius:4px;margin-top:8px;padding-top:8px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;}"
+        )
+        art_v = QVBoxLayout(grp_art)
+
+        # Nur Typen die ablaufen können
+        self._art_checks: dict[str, QCheckBox] = {}
+        ablaufende_typen = {
+            k: cfg for k, cfg in SCHULUNGSTYPEN_CFG.items()
+            if not cfg.get("laeuft_nicht_ab", False)
+        }
+        row_l = QHBoxLayout()
+        for key, cfg in ablaufende_typen.items():
+            cb = QCheckBox(cfg["anzeige"])
+            cb.setChecked(True)
+            self._art_checks[key] = cb
+            row_l.addWidget(cb)
+        art_v.addLayout(row_l)
+
+        btn_alle = QPushButton("Alle")
+        btn_alle.setFixedWidth(60)
+        btn_alle.clicked.connect(lambda: [cb.setChecked(True) for cb in self._art_checks.values()])
+        btn_keine = QPushButton("Keine")
+        btn_keine.setFixedWidth(60)
+        btn_keine.clicked.connect(lambda: [cb.setChecked(False) for cb in self._art_checks.values()])
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(btn_alle)
+        btn_row.addWidget(btn_keine)
+        btn_row.addStretch()
+        art_v.addLayout(btn_row)
+        v.addWidget(grp_art)
+
+        # ── Zeitraum ──────────────────────────────────────────────────────────
+        grp_zeit = QGroupBox("Zeitraum (Gültig-bis-Datum)")
+        grp_zeit.setStyleSheet(
+            "QGroupBox{font-weight:bold;border:1px solid #90caf9;"
+            "border-radius:4px;margin-top:8px;padding-top:8px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;}"
+        )
+        zeit_v = QVBoxLayout(grp_zeit)
+
+        # Quick-Buttons
+        qbtn_row = QHBoxLayout()
+        qbtn_row.setSpacing(6)
+        for label, monate in [
+            ("Nur abgelaufen",  0),
+            ("≤ 1 Monat",       1),
+            ("≤ 2 Monate",      2),
+            ("≤ 3 Monate",      3),
+            ("≤ 6 Monate",      6),
+            ("≤ 12 Monate",    12),
+        ]:
+            b = QPushButton(label)
+            b.setFixedHeight(26)
+            b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            b.setStyleSheet(
+                "QPushButton{background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;"
+                "border-radius:4px;font-size:11px;padding:1px 8px;}"
+                "QPushButton:hover{background:#bbdefb;}"
+            )
+            b.clicked.connect(lambda checked=False, m=monate: self._schnell_setzen(m))
+            qbtn_row.addWidget(b)
+        qbtn_row.addStretch()
+        zeit_v.addLayout(qbtn_row)
+
+        # Von/Bis
+        vb_row = QHBoxLayout()
+        vb_row.addWidget(QLabel("Von:"))
+        self._de_von = QDateEdit()
+        self._de_von.setCalendarPopup(True)
+        self._de_von.setDisplayFormat("dd.MM.yyyy")
+        self._de_von.setDate(QDate(2000, 1, 1))
+        vb_row.addWidget(self._de_von)
+        vb_row.addSpacing(12)
+        vb_row.addWidget(QLabel("Bis:"))
+        self._de_bis = QDateEdit()
+        self._de_bis.setCalendarPopup(True)
+        self._de_bis.setDisplayFormat("dd.MM.yyyy")
+        today = date.today()
+        self._de_bis.setDate(QDate(today.year, today.month + 3 if today.month <= 9 else today.month - 9,
+                                    today.day))
+        vb_row.addWidget(self._de_bis)
+        vb_row.addStretch()
+        zeit_v.addLayout(vb_row)
+        v.addWidget(grp_zeit)
+
+        # Standardmäßig ≤ 3 Monate
+        self._schnell_setzen(3)
+
+        # ── Speicherort ───────────────────────────────────────────────────────
+        pf_row = QHBoxLayout()
+        pf_row.addWidget(QLabel("Speicherpfad:"))
+        self._pfad_edit = QLineEdit()
+        self._pfad_edit.setText(os.path.join(_SCHULUNG_EXPORT_DIR,
+                                              self._dateiname_berechnen()))
+        pf_row.addWidget(self._pfad_edit, 1)
+        btn_browse = QPushButton("...")
+        btn_browse.setFixedWidth(28)
+        btn_browse.clicked.connect(self._browse)
+        pf_row.addWidget(btn_browse)
+        v.addLayout(pf_row)
+
+        # ── OK / Abbrechen ────────────────────────────────────────────────────
+        dlg_btns = QHBoxLayout()
+        dlg_btns.addStretch()
+        btn_ok = QPushButton("📊 Exportieren")
+        btn_ok.setFixedHeight(30)
+        btn_ok.setStyleSheet(
+            "QPushButton{background:#1565c0;color:#fff;border:none;"
+            "border-radius:4px;padding:2px 16px;font-size:12px;}"
+            "QPushButton:hover{background:#0d47a1;}"
+        )
+        btn_ok.clicked.connect(self.accept)
+        btn_ab = QPushButton("Abbrechen")
+        btn_ab.setFixedHeight(30)
+        btn_ab.clicked.connect(self.reject)
+        dlg_btns.addWidget(btn_ab)
+        dlg_btns.addWidget(btn_ok)
+        v.addLayout(dlg_btns)
+
+    def _dateiname_berechnen(self) -> str:
+        today = date.today()
+        return f"Schulungen_Ablaufend_{today.strftime('%Y-%m-%d')}.xlsx"
+
+    def _schnell_setzen(self, monate: int):
+        today = date.today()
+        q_von = QDate(2000, 1, 1)   # weit in der Vergangenheit
+        if monate == 0:
+            # Nur abgelaufen: bis gestern
+            gd = today - timedelta(days=1)
+            q_bis = QDate(gd.year, gd.month, gd.day)
+        else:
+            from datetime import date as _date
+            try:
+                bis = today.replace(month=today.month + monate)
+            except ValueError:
+                # Monatsüberlauf
+                import calendar as _cal
+                total = today.month + monate
+                year  = today.year + (total - 1) // 12
+                month = ((total - 1) % 12) + 1
+                day   = min(today.day, _cal.monthrange(year, month)[1])
+                bis   = today.replace(year=year, month=month, day=day)
+            q_bis = QDate(bis.year, bis.month, bis.day)
+        self._de_von.setDate(q_von)
+        self._de_bis.setDate(q_bis)
+
+    def _browse(self):
+        from PySide6.QtWidgets import QFileDialog
+        start = self._pfad_edit.text() or _SCHULUNG_EXPORT_DIR
+        pfad, _ = QFileDialog.getSaveFileName(
+            self, "Excel speichern unter", start, "Excel (*.xlsx)"
+        )
+        if pfad:
+            if not pfad.lower().endswith(".xlsx"):
+                pfad += ".xlsx"
+            self._pfad_edit.setText(pfad)
+
+    def get_werte(self):
+        """Gibt (von_datum, bis_datum, speicherpfad, schulungstypen_liste) zurück."""
+        vq = self._de_von.date()
+        bq = self._de_bis.date()
+        von = date(vq.year(), vq.month(), vq.day())
+        bis = date(bq.year(), bq.month(), bq.day())
+        typen = [k for k, cb in self._art_checks.items() if cb.isChecked()]
+        return von, bis, self._pfad_edit.text(), typen
 
 
 # ─── Agenda-Liste ─────────────────────────────────────────────────────────────
@@ -1426,8 +1760,11 @@ class SchulungenKalenderWidget(QWidget):
         self._btn_import.clicked.connect(self._excel_importieren)
         self._btn_neuer_ma = _btn("👤  Neuer Mitarbeiter", "#2e7d32", "#1b5e20", 32)
         self._btn_neuer_ma.clicked.connect(self._neuer_mitarbeiter)
+        self._btn_excel_export = _btn("📊  Excel-Export", "#6a1b9a", "#4a148c", 32)
+        self._btn_excel_export.clicked.connect(self._schulungen_excel_export)
         cl.addWidget(self._btn_import)
         cl.addWidget(self._btn_neuer_ma)
+        cl.addWidget(self._btn_excel_export)
         v.addWidget(ctrl)
 
         # ── Haupt-Tabs: Kalender | Mitarbeiter-Liste ───────────────────────
@@ -1560,6 +1897,54 @@ class SchulungenKalenderWidget(QWidget):
         except Exception as e:
             prog.close()
             QMessageBox.critical(self, "Import-Fehler", str(e))
+
+    def _schulungen_excel_export(self):
+        """Öffnet den Export-Dialog und speichert ablaufende Schulungen als Excel."""
+        from functions.schulungen_db import lade_eintraege_fuer_export
+
+        dlg = _SchulungExportDialog(parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        von, bis, speicherpfad, typen = dlg.get_werte()
+
+        if not speicherpfad:
+            QMessageBox.warning(self, "Kein Pfad", "Bitte einen Speicherpfad angeben.")
+            return
+        if not typen:
+            QMessageBox.warning(self, "Keine Schulungsart", "Bitte mindestens eine Schulungsart auswählen.")
+            return
+
+        try:
+            eintraege = lade_eintraege_fuer_export(von, bis, typen)
+        except Exception as exc:
+            QMessageBox.critical(self, "Datenbankfehler", str(exc))
+            return
+
+        if not eintraege:
+            QMessageBox.information(self, "Keine Einträge",
+                                     "Für die gewählten Filter wurden keine Einträge gefunden.")
+            return
+
+        # Sortieren: abgelaufen zuerst, dann nach Tagen
+        eintraege.sort(key=lambda e: e.get("_tage_rest", 9999))
+
+        try:
+            _schulungen_als_excel_speichern(eintraege, speicherpfad)
+        except Exception as exc:
+            QMessageBox.critical(self, "Excel-Export fehlgeschlagen", str(exc))
+            return
+
+        antwort = QMessageBox.question(
+            self, "Excel-Export erfolgreich",
+            f"✅ {len(eintraege)} Einträge wurden exportiert:\n\n📄 {speicherpfad}\n\nDatei jetzt öffnen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if antwort == QMessageBox.StandardButton.Yes:
+            try:
+                os.startfile(speicherpfad)
+            except Exception as exc:
+                QMessageBox.warning(self, "Öffnen fehlgeschlagen", str(exc))
 
     def _neuer_mitarbeiter(self):
         from functions.schulungen_db import (

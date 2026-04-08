@@ -375,6 +375,59 @@ def lade_ablaufende(monate: int = 3) -> list[dict]:
     return result
 
 
+def lade_eintraege_fuer_export(von_datum: date, bis_datum: date,
+                                schulungstypen: list | None = None) -> list[dict]:
+    """
+    Gibt Schulungseinträge zurück, bei denen gueltig_bis im Bereich
+    [von_datum, bis_datum] liegt. Pro MA+Schulungstyp nur den neuesten Eintrag.
+    schulungstypen: Liste von Typ-Keys (z. B. ['EH', 'Refresher']).
+                    None = alle Typen berücksichtigen.
+    """
+    _init_db()
+    heute = date.today()
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT se.*, m.nachname, m.vorname, m.qualifikation
+               FROM schulungseintraege se
+               JOIN mitarbeiter m ON m.id = se.mitarbeiter_id
+               WHERE se.laeuft_nicht_ab = 0
+                 AND se.gueltig_bis IS NOT NULL
+                 AND se.gueltig_bis != ''
+                 AND se.id IN (
+                     SELECT id FROM schulungseintraege se2
+                     WHERE se2.laeuft_nicht_ab = 0
+                       AND se2.mitarbeiter_id = se.mitarbeiter_id
+                       AND se2.schulungstyp   = se.schulungstyp
+                       AND se2.gueltig_bis = (
+                           SELECT MAX(se3.gueltig_bis)
+                           FROM schulungseintraege se3
+                           WHERE se3.mitarbeiter_id = se.mitarbeiter_id
+                             AND se3.schulungstyp   = se.schulungstyp
+                       )
+                 )
+               ORDER BY se.gueltig_bis""",
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        if schulungstypen and d.get("schulungstyp") not in schulungstypen:
+            continue
+        gb = _parse_datum(d.get("gueltig_bis"))
+        if gb is None:
+            continue
+        if not (von_datum <= gb <= bis_datum):
+            continue
+        diff = (gb - heute).days
+        d["_datum_obj"]     = gb
+        d["_tage_rest"]     = diff
+        d["_dringlichkeit"] = _dringlichkeit(gb, False)
+        d["_name"] = f"{d.get('nachname','')} {d.get('vorname','')}".strip()
+        result.append(d)
+    return result
+
+
 def lade_kalender_daten(jahr: int, monat: int) -> dict:
     """Gibt dict {date: [eintrag_dict, ...]} für den angegebenen Monat zurück.
     Pro MA + Typ wird nur der neueste Eintrag (höchstes gueltig_bis) gezeigt.
