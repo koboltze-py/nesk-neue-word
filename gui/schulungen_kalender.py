@@ -842,6 +842,17 @@ class _SchulungExportDialog(QDialog):
             "border-radius:4px;padding:2px 16px;font-size:12px;}"
             "QPushButton:hover{background:#0d47a1;}"
         )
+        # ── Optionen ──────────────────────────────────────────────────────────
+        opt_row = QHBoxLayout()
+        self._cb_ohne_abgelaufene = QCheckBox("Abgelaufene ausschließen")
+        self._cb_ohne_abgelaufene.setChecked(False)
+        self._cb_ohne_abgelaufene.setToolTip(
+            "Wenn aktiviert, werden Einträge mit überschrittenem Ablaufdatum nicht exportiert."
+        )
+        opt_row.addWidget(self._cb_ohne_abgelaufene)
+        opt_row.addStretch()
+        v.addLayout(opt_row)
+
         btn_ok.clicked.connect(self.accept)
         btn_ab = QPushButton("Abbrechen")
         btn_ab.setFixedHeight(30)
@@ -889,13 +900,13 @@ class _SchulungExportDialog(QDialog):
             self._pfad_edit.setText(pfad)
 
     def get_werte(self):
-        """Gibt (von_datum, bis_datum, speicherpfad, schulungstypen_liste) zurück."""
+        """Gibt (von_datum, bis_datum, speicherpfad, schulungstypen_liste, ohne_abgelaufene) zurück."""
         vq = self._de_von.date()
         bq = self._de_bis.date()
         von = date(vq.year(), vq.month(), vq.day())
         bis = date(bq.year(), bq.month(), bq.day())
         typen = [k for k, cb in self._art_checks.items() if cb.isChecked()]
-        return von, bis, self._pfad_edit.text(), typen
+        return von, bis, self._pfad_edit.text(), typen, self._cb_ohne_abgelaufene.isChecked()
 
 
 # ─── Agenda-Liste ─────────────────────────────────────────────────────────────
@@ -1906,7 +1917,7 @@ class SchulungenKalenderWidget(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        von, bis, speicherpfad, typen = dlg.get_werte()
+        von, bis, speicherpfad, typen, ohne_abgelaufene = dlg.get_werte()
 
         if not speicherpfad:
             QMessageBox.warning(self, "Kein Pfad", "Bitte einen Speicherpfad angeben.")
@@ -1925,6 +1936,9 @@ class SchulungenKalenderWidget(QWidget):
             QMessageBox.information(self, "Keine Einträge",
                                      "Für die gewählten Filter wurden keine Einträge gefunden.")
             return
+
+        if ohne_abgelaufene:
+            eintraege = [e for e in eintraege if e.get("_tage_rest", 0) >= 0]
 
         # Sortieren: abgelaufen zuerst, dann nach Tagen
         eintraege.sort(key=lambda e: e.get("_tage_rest", 9999))
