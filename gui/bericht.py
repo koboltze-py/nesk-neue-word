@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
     QTextEdit, QDialogButtonBox, QDialog,
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtGui import QFont, QColor
 
 from config import BASE_DIR, FIORI_BLUE, FIORI_TEXT
@@ -148,6 +148,75 @@ class _AbschnittPanel(QGroupBox):
     def zeitraum_label(self) -> str:
         return (f"{self._von.date().toString('dd.MM.yyyy')} – "
                 f"{self._bis.date().toString('dd.MM.yyyy')}")
+
+
+# ─── Schulungen-Panel (erweitert) ────────────────────────────────────────────
+class _SchulungenPanel(_AbschnittPanel):
+    """Abschnitts-Panel für Schulungen mit Typ-Auswahl und Zusatzfiltern."""
+
+    filterGeaendert = Signal()
+
+    def __init__(self, titel: str, farbe_ak: str, farbe_bg: str, parent=None):
+        super().__init__(titel, farbe_ak, farbe_bg, parent)
+        self._build_schulungen_filter()
+
+    def _build_schulungen_filter(self):
+        from functions.schulungen_db import SCHULUNGSTYPEN_CFG
+        layout: QFormLayout = self.layout()
+        _cb_style = "QCheckBox{font-size:11px;} QCheckBox::indicator{width:14px;height:14px;}"
+
+        # ── Separator ────────────────────────────────────────────────────────
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("color:#ccc;margin:2px 0;")
+        layout.addRow(sep1)
+
+        # ── Filter-Optionen ──────────────────────────────────────────────────
+        self._cb_abgelaufene = QCheckBox("Abgelaufene ausschließen")
+        self._cb_abgelaufene.setStyleSheet(_cb_style)
+        self._cb_abgelaufene.setChecked(False)
+        self._cb_abgelaufene.stateChanged.connect(self.filterGeaendert)
+        layout.addRow(self._cb_abgelaufene)
+
+        self._cb_bald_faellig = QCheckBox("Nur fällig in < 6 Monaten")
+        self._cb_bald_faellig.setStyleSheet(_cb_style)
+        self._cb_bald_faellig.setChecked(False)
+        self._cb_bald_faellig.stateChanged.connect(self.filterGeaendert)
+        layout.addRow(self._cb_bald_faellig)
+
+        # ── Separator ────────────────────────────────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color:#ccc;margin:2px 0;")
+        layout.addRow(sep2)
+
+        lbl_typen = QLabel("Schulungsarten:")
+        lbl_typen.setStyleSheet("font-size:10px;font-weight:bold;color:#555;")
+        layout.addRow(lbl_typen)
+
+        self._typ_cbs: dict[str, QCheckBox] = {}
+        for key, cfg in SCHULUNGSTYPEN_CFG.items():
+            if cfg.get("laeuft_nicht_ab", False):
+                continue  # nur Typen mit Ablaufdatum anzeigen
+            cb = QCheckBox(cfg["anzeige"])
+            cb.setStyleSheet(_cb_style)
+            cb.setChecked(True)
+            cb.stateChanged.connect(self.filterGeaendert)
+            self._typ_cbs[key] = cb
+            layout.addRow(cb)
+
+    def get_aktive_typen(self) -> list[str] | None:
+        """Gibt die Liste aktiver Typ-Keys zurück; None bedeutet alle Typen."""
+        aktive = [k for k, cb in self._typ_cbs.items() if cb.isChecked()]
+        if len(aktive) == len(self._typ_cbs):
+            return None  # alle aktiv → kein Filter notwendig
+        return aktive or None
+
+    def abgelaufene_ausschliessen(self) -> bool:
+        return self._cb_abgelaufene.isChecked()
+
+    def nur_bald_faellig(self) -> bool:
+        return self._cb_bald_faellig.isChecked()
 
 
 # ─── Vorschau-Widget ──────────────────────────────────────────────────────────
@@ -533,7 +602,7 @@ class BerichtWidget(QWidget):
 
         c = _FARBEN
         self._panel_versp = _AbschnittPanel("⏰  Verspätungen",    c["verspaetungen"][0], c["verspaetungen"][1])
-        self._panel_schu  = _AbschnittPanel("🎓  Schulungen",       c["schulungen"][0],    c["schulungen"][1])
+        self._panel_schu  = _SchulungenPanel("🎓  Schulungen",       c["schulungen"][0],    c["schulungen"][1])
         self._panel_eins  = _AbschnittPanel("🚑  Einsätze",         c["einsaetze"][0],     c["einsaetze"][1])
         self._panel_pat   = _AbschnittPanel("🏥  Pat. auf Station", c["patienten"][0],     c["patienten"][1])
 
@@ -542,6 +611,7 @@ class BerichtWidget(QWidget):
             panel._von.dateChanged.connect(self._aktualisiere_vorschau)
             panel._bis.dateChanged.connect(self._aktualisiere_vorschau)
             linke_layout.addWidget(panel)
+        self._panel_schu.filterGeaendert.connect(self._aktualisiere_vorschau)
 
         linke_layout.addStretch()
         linke_scroll.setWidget(linke_seite)
@@ -602,10 +672,16 @@ class BerichtWidget(QWidget):
         if self._panel_schu.aktiv():
             try:
                 from functions.schulungen_db import lade_eintraege_fuer_export
+                aktive_typen = self._panel_schu.get_aktive_typen()
                 gefiltert = lade_eintraege_fuer_export(
                     self._panel_schu.von_datum(),
                     self._panel_schu.bis_datum(),
+                    schulungstypen=aktive_typen,
                 )
+                if self._panel_schu.abgelaufene_ausschliessen():
+                    gefiltert = [e for e in gefiltert if e.get("_tage_rest", -1) >= 0]
+                if self._panel_schu.nur_bald_faellig():
+                    gefiltert = [e for e in gefiltert if 0 <= e.get("_tage_rest", 999) <= 180]
             except Exception:
                 gefiltert = []
             abschnitte.append({
