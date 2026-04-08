@@ -1766,20 +1766,24 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._tabs.addTab(self._build_verspaetungen_tab(), "⏰  Verspätungs-Protokoll")
         self._tabs.setTabVisible(2, False)  # nur bei Verspätung sichtbar
 
-        # ── TAB 3: PSA-Protokoll ──────────────────────────────────────────────
-        self._tabs.addTab(self._build_psa_tab(), "🦺  PSA-Protokoll")
-        self._tabs.setTabVisible(3, False)  # nur bei PSA sichtbar
+        # ── TAB 3: Verspätungs-Statistik ──────────────────────────────────────
+        self._tabs.addTab(self._build_versp_statistik_tab(), "📊  Statistik")
+        self._tabs.setTabVisible(3, False)  # nur bei Verspätung sichtbar
 
-        # ── TAB 4: Ausdrucke (DokumentBrowser) ───────────────────────────────
+        # ── TAB 4: PSA-Protokoll ──────────────────────────────────────────────
+        self._tabs.addTab(self._build_psa_tab(), "🦺  PSA-Protokoll")
+        self._tabs.setTabVisible(4, False)  # nur bei PSA sichtbar
+
+        # ── TAB 5: Ausdrucke (DokumentBrowser) ───────────────────────────────
         from gui.dokument_browser import DokumentBrowserWidget
         _ausdrucke_path = os.path.join(BASE_DIR, "Daten", "Vordrucke")
         self._ausdrucke_browser = DokumentBrowserWidget(
             "🖨️  Ausdrucke – Vordrucke", _ausdrucke_path
         )
         self._tabs.addTab(self._ausdrucke_browser, "🖨️  Ausdrucke")
-        self._tabs.setTabVisible(4, False)
+        self._tabs.setTabVisible(5, False)
 
-        # ── TAB 5: Krankmeldungen (DokumentBrowser) ──────────────────────────
+        # ── TAB 6: Krankmeldungen (DokumentBrowser) ──────────────────────────
         _krankmeld_path = os.path.join(
             os.path.dirname(os.path.dirname(BASE_DIR)), "03_Krankmeldungen"
         )
@@ -1787,11 +1791,11 @@ class MitarbeiterDokumenteWidget(QWidget):
             "🤒  Krankmeldungen", _krankmeld_path, allow_subfolders=True
         )
         self._tabs.addTab(self._krankmeldungen_browser, "🤒  Krankmeldungen")
-        self._tabs.setTabVisible(5, False)
-
-        # ── TAB 6: Schulungen ─────────────────────────────────────────────────
-        self._tabs.addTab(self._build_schulungen_tab(), "🎓  Schulungen")
         self._tabs.setTabVisible(6, False)
+
+        # ── TAB 7: Schulungen ─────────────────────────────────────────────────
+        self._tabs.addTab(self._build_schulungen_tab(), "🎓  Schulungen")
+        self._tabs.setTabVisible(7, False)
 
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -2062,8 +2066,321 @@ class MitarbeiterDokumenteWidget(QWidget):
         layout.addLayout(vbtn_row)
         return w
 
+    def _build_versp_statistik_tab(self) -> QWidget:
+        """TAB 3: Verspätungs-Statistik – Zeitraum + MA-Auswahl + Übersichtstabelle."""
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # ── Filter-Zeile ──────────────────────────────────────────────────────
+        filter_frame = QFrame()
+        filter_frame.setStyleSheet(
+            "QFrame{background:#e8f5e9;border:1px solid #a5d6a7;"
+            "border-radius:4px;padding:4px;}"
+        )
+        fl = QHBoxLayout(filter_frame)
+        fl.setContentsMargins(8, 6, 8, 6)
+        fl.setSpacing(10)
+
+        from PySide6.QtCore import QDate
+        from datetime import datetime as _dt
+        heute = _dt.today()
+
+        fl.addWidget(QLabel("Von:"))
+        self._stat_de_von = QDateEdit()
+        self._stat_de_von.setCalendarPopup(True)
+        self._stat_de_von.setDisplayFormat("dd.MM.yyyy")
+        self._stat_de_von.setDate(QDate(heute.year, 1, 1))
+        self._stat_de_von.setFixedWidth(115)
+        fl.addWidget(self._stat_de_von)
+
+        fl.addWidget(QLabel("Bis:"))
+        self._stat_de_bis = QDateEdit()
+        self._stat_de_bis.setCalendarPopup(True)
+        self._stat_de_bis.setDisplayFormat("dd.MM.yyyy")
+        self._stat_de_bis.setDate(QDate(heute.year, heute.month, heute.day))
+        self._stat_de_bis.setFixedWidth(115)
+        fl.addWidget(self._stat_de_bis)
+
+        fl.addWidget(QLabel("Mitarbeiter:"))
+        self._stat_combo_ma = QComboBox()
+        self._stat_combo_ma.setMinimumWidth(180)
+        self._stat_combo_ma.addItem("Alle", None)
+        fl.addWidget(self._stat_combo_ma)
+
+        # Schnellauswahl
+        for label, tage in [("Dieser Monat", 0), ("Letzter Monat", -1), ("Dieses Jahr", -99)]:
+            btn = _btn_light(label)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda checked, t=tage: self._stat_schnell_setzen(t))
+            fl.addWidget(btn)
+
+        fl.addStretch()
+
+        btn_aktualisieren = _btn("🔄  Aktualisieren", "#1565a8", "#0d47a1")
+        btn_aktualisieren.setFixedHeight(28)
+        btn_aktualisieren.clicked.connect(self._versp_statistik_lade)
+        fl.addWidget(btn_aktualisieren)
+
+        layout.addWidget(filter_frame)
+
+        # ── Kennzahlen-Zeile ──────────────────────────────────────────────────
+        self._stat_kpi_frame = QFrame()
+        self._stat_kpi_frame.setStyleSheet(
+            "QFrame{background:#f1f8e9;border:1px solid #c5e1a5;"
+            "border-radius:4px;padding:6px;}"
+        )
+        kpi_row = QHBoxLayout(self._stat_kpi_frame)
+        kpi_row.setSpacing(24)
+        kpi_row.setContentsMargins(16, 6, 16, 6)
+
+        def _kpi_lbl(titel):
+            frame = QFrame()
+            frame.setStyleSheet("QFrame{border:none;background:transparent;}")
+            vl = QVBoxLayout(frame)
+            vl.setSpacing(2)
+            vl.setContentsMargins(0, 0, 0, 0)
+            lbl_wert = QLabel("—")
+            lbl_wert.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+            lbl_wert.setStyleSheet("color:#1565a8;")
+            lbl_wert.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_titel = QLabel(titel)
+            lbl_titel.setStyleSheet("color:#555;font-size:11px;")
+            lbl_titel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vl.addWidget(lbl_wert)
+            vl.addWidget(lbl_titel)
+            return frame, lbl_wert
+
+        kpi_row.addStretch()
+        self._stat_kpi_gesamt_f,  self._stat_kpi_gesamt  = _kpi_lbl("Verspätungen gesamt")
+        self._stat_kpi_ma_f,      self._stat_kpi_ma      = _kpi_lbl("Betroffene Mitarbeiter")
+        self._stat_kpi_avg_f,     self._stat_kpi_avg     = _kpi_lbl("Ø Verspätung (Min.)")
+        self._stat_kpi_max_f,     self._stat_kpi_max     = _kpi_lbl("Max. Verspätung (Min.)")
+        for f in (self._stat_kpi_gesamt_f, self._stat_kpi_ma_f,
+                  self._stat_kpi_avg_f, self._stat_kpi_max_f):
+            kpi_row.addWidget(f)
+        kpi_row.addStretch()
+        layout.addWidget(self._stat_kpi_frame)
+
+        # ── Statistik-Tabelle ─────────────────────────────────────────────────
+        self._stat_table = QTableWidget()
+        self._stat_table.setColumnCount(7)
+        self._stat_table.setHorizontalHeaderLabels([
+            "Mitarbeiter", "Anzahl", "Ø Min.", "Min. Min.", "Max. Min.",
+            "Häufigster Dienst", "Letztes Datum",
+        ])
+        hh = self._stat_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for c in range(1, 7):
+            hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        self._stat_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._stat_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._stat_table.setAlternatingRowColors(True)
+        self._stat_table.setStyleSheet("QTableWidget{border:1px solid #ddd;font-size:12px;}")
+        self._stat_table.verticalHeader().setVisible(False)
+        self._stat_table.setSortingEnabled(True)
+        self._stat_table.itemSelectionChanged.connect(self._stat_ma_gewaehlt)
+        layout.addWidget(self._stat_table, 1)
+
+        # ── Detail-Tabelle (Einzelvorfälle des gewählten MA) ──────────────────
+        self._stat_detail_label = QLabel("Alle Vorfälle des gewählten Mitarbeiters:")
+        self._stat_detail_label.setStyleSheet("color:#444;font-size:11px;font-weight:bold;padding-top:4px;")
+        self._stat_detail_label.setVisible(False)
+        layout.addWidget(self._stat_detail_label)
+
+        self._stat_detail_table = QTableWidget()
+        self._stat_detail_table.setColumnCount(6)
+        self._stat_detail_table.setHorizontalHeaderLabels([
+            "Datum", "Dienst", "Dienstbeginn", "Dienstantritt", "Verspätung (Min.)", "Aufgenommen von",
+        ])
+        dhh = self._stat_detail_table.horizontalHeader()
+        dhh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        dhh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        dhh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        dhh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        dhh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        dhh.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self._stat_detail_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._stat_detail_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._stat_detail_table.setAlternatingRowColors(True)
+        self._stat_detail_table.setStyleSheet("QTableWidget{border:1px solid #ddd;font-size:11px;}")
+        self._stat_detail_table.verticalHeader().setVisible(False)
+        self._stat_detail_table.setMaximumHeight(180)
+        self._stat_detail_table.setVisible(False)
+        layout.addWidget(self._stat_detail_table)
+
+        self._stat_eintraege: list[dict] = []
+        return w
+
+    def _stat_schnell_setzen(self, kennung: int):
+        from datetime import datetime as _dt
+        from PySide6.QtCore import QDate
+        import calendar
+        heute = _dt.today()
+        if kennung == 0:  # Dieser Monat
+            von = _dt(heute.year, heute.month, 1)
+            bis = heute
+        elif kennung == -1:  # Letzter Monat
+            m = heute.month - 1 or 12
+            j = heute.year if heute.month > 1 else heute.year - 1
+            von = _dt(j, m, 1)
+            bis = _dt(j, m, calendar.monthrange(j, m)[1])
+        else:  # Dieses Jahr
+            von = _dt(heute.year, 1, 1)
+            bis = heute
+        self._stat_de_von.setDate(QDate(von.year, von.month, von.day))
+        self._stat_de_bis.setDate(QDate(bis.year, bis.month, bis.day))
+        self._versp_statistik_lade()
+
+    def _versp_statistik_lade(self):
+        """Statistik-Tab befüllen: alle Einträge laden und aggregieren."""
+        from datetime import datetime as _dt
+        from collections import defaultdict, Counter
+
+        von_q = self._stat_de_von.date()
+        bis_q = self._stat_de_bis.date()
+        datum_von = _dt(von_q.year(), von_q.month(), von_q.day())
+        datum_bis = _dt(bis_q.year(), bis_q.month(), bis_q.day(), 23, 59, 59)
+
+        try:
+            alle = lade_verspaetungen()
+        except Exception as exc:
+            QMessageBox.critical(self, "Datenbankfehler", str(exc))
+            return
+
+        def _parse(d):
+            try:
+                return _dt.strptime(d, "%d.%m.%Y")
+            except ValueError:
+                return None
+
+        gefiltert = [
+            e for e in alle
+            if (p := _parse(e.get("datum", ""))) is not None
+            and datum_von <= p <= datum_bis
+            and (e.get("verspaetung_min") or 0) > 0  # nur echte Verspätungen
+        ]
+
+        # MA-Filter-Combobox befüllen
+        aktuell_ma = self._stat_combo_ma.currentData()
+        self._stat_combo_ma.blockSignals(True)
+        self._stat_combo_ma.clear()
+        self._stat_combo_ma.addItem("Alle", None)
+        alle_ma = sorted({e.get("mitarbeiter", "") for e in gefiltert if e.get("mitarbeiter")})
+        for ma in alle_ma:
+            self._stat_combo_ma.addItem(ma, ma)
+        # Vorherige Auswahl wiederherstellen
+        for i in range(self._stat_combo_ma.count()):
+            if self._stat_combo_ma.itemData(i) == aktuell_ma:
+                self._stat_combo_ma.setCurrentIndex(i)
+                break
+        self._stat_combo_ma.blockSignals(False)
+
+        # MA-Filter anwenden
+        filter_ma = self._stat_combo_ma.currentData()
+        if filter_ma:
+            gefiltert = [e for e in gefiltert if e.get("mitarbeiter") == filter_ma]
+
+        self._stat_eintraege = gefiltert
+
+        # ── Aggregieren pro Mitarbeiter ───────────────────────────────────────
+        gruppen: dict[str, list[dict]] = defaultdict(list)
+        for e in gefiltert:
+            gruppen[e.get("mitarbeiter", "Unbekannt")].append(e)
+
+        zeilen = []
+        for ma, eintr in gruppen.items():
+            minuten = [e.get("verspaetung_min") or 0 for e in eintr]
+            minuten_pos = [m for m in minuten if m > 0]
+            if not minuten_pos:
+                continue
+            avg = round(sum(minuten_pos) / len(minuten_pos), 1)
+            dienste = Counter(e.get("dienst", "") for e in eintr)
+            haeufigster = dienste.most_common(1)[0][0] if dienste else "—"
+            daten = sorted(
+                [p for e in eintr if (p := _parse(e.get("datum", "")))],
+                reverse=True,
+            )
+            letztes = daten[0].strftime("%d.%m.%Y") if daten else "—"
+            zeilen.append((ma, len(minuten_pos), avg, min(minuten_pos), max(minuten_pos), haeufigster, letztes))
+
+        # Nach Anzahl absteigend sortieren
+        zeilen.sort(key=lambda x: x[1], reverse=True)
+
+        # ── Tabelle befüllen ──────────────────────────────────────────────────
+        self._stat_table.setSortingEnabled(False)
+        self._stat_table.setRowCount(len(zeilen))
+        farben = [QColor("#fff8e1"), QColor("#ffecb3"), QColor("#ffe082")]
+        for row, (ma, anz, avg, mn, mx, dienst, letztes) in enumerate(zeilen):
+            farbe = farben[0] if anz >= 5 else (farben[1] if anz >= 3 else QColor("#f9f9f9"))
+            werte = [ma, str(anz), str(avg), str(mn), str(mx), dienst, letztes]
+            for col, wert in enumerate(werte):
+                item = QTableWidgetItem(wert)
+                item.setBackground(farbe)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignCenter if col != 0
+                    else Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                )
+                # Numerische Sortierung für Zahlenspalten
+                if col in (1, 2, 3, 4):
+                    try:
+                        item.setData(Qt.ItemDataRole.UserRole, float(wert))
+                    except ValueError:
+                        pass
+                self._stat_table.setItem(row, col, item)
+        self._stat_table.setSortingEnabled(True)
+
+        # ── KPI-Zeile aktualisieren ───────────────────────────────────────────
+        alle_min = [e.get("verspaetung_min") or 0 for e in gefiltert if (e.get("verspaetung_min") or 0) > 0]
+        self._stat_kpi_gesamt.setText(str(len(alle_min)))
+        self._stat_kpi_ma.setText(str(len(gruppen)))
+        self._stat_kpi_avg.setText(str(round(sum(alle_min) / len(alle_min), 1)) if alle_min else "—")
+        self._stat_kpi_max.setText(str(max(alle_min)) if alle_min else "—")
+
+        # Detail-Tabelle leeren
+        self._stat_detail_table.setRowCount(0)
+        self._stat_detail_table.setVisible(False)
+        self._stat_detail_label.setVisible(False)
+
+    def _stat_ma_gewaehlt(self):
+        """Zeigt die Einzelvorfälle des in der Statistik-Tabelle selektierten MA."""
+        from datetime import datetime as _dt
+        row = self._stat_table.currentRow()
+        ma_item = self._stat_table.item(row, 0)
+        if not ma_item:
+            return
+        ma_name = ma_item.text()
+        vorfaelle = [e for e in self._stat_eintraege if e.get("mitarbeiter") == ma_name]
+        vorfaelle.sort(
+            key=lambda e: (
+                lambda d: _dt.strptime(d, "%d.%m.%Y") if d else _dt.min
+            )(e.get("datum", "")),
+            reverse=True,
+        )
+        self._stat_detail_label.setText(f"Alle Vorfälle: {ma_name}")
+        self._stat_detail_label.setVisible(True)
+        self._stat_detail_table.setVisible(True)
+        self._stat_detail_table.setRowCount(len(vorfaelle))
+        for row, e in enumerate(vorfaelle):
+            vmin = e.get("verspaetung_min") or 0
+            zeile = [
+                e.get("datum", ""),
+                e.get("dienst", ""),
+                e.get("dienstbeginn", ""),
+                e.get("dienstantritt", ""),
+                str(vmin),
+                e.get("aufgenommen_von", "") or "—",
+            ]
+            farbe = QColor("#fff3cd") if vmin > 0 else QColor("#d4edda")
+            for col, wert in enumerate(zeile):
+                item = QTableWidgetItem(wert)
+                item.setBackground(farbe)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._stat_detail_table.setItem(row, col, item)
+
     def _build_psa_tab(self) -> QWidget:
-        """TAB 3: PSA-Protokoll – Filterzeile, Tabelle, Aktionen."""
+        """TAB 4: PSA-Protokoll – Filterzeile, Tabelle, Aktionen."""
         w = QWidget()
         layout = QVBoxLayout(w)
         layout.setContentsMargins(0, 8, 0, 0)
@@ -2304,7 +2621,7 @@ class MitarbeiterDokumenteWidget(QWidget):
         """Schaltet zum Schulungen-Tab (Tab 6) im Haupt-Tab-Widget."""
         if hasattr(self, '_tabs'):
             # Tab 6 = Schulungen (0-basiert)
-            schulungen_idx = 6
+            schulungen_idx = 7
             if self._tabs.count() > schulungen_idx:
                 self._tabs.setCurrentIndex(schulungen_idx)
 
@@ -2319,14 +2636,18 @@ class MitarbeiterDokumenteWidget(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _versp_jahre_aktualisieren(self):
+        from datetime import datetime as _dt
         current = self._versp_combo_jahr.currentData()
         self._versp_combo_jahr.blockSignals(True)
         self._versp_combo_jahr.clear()
         self._versp_combo_jahr.addItem("Alle", None)
         for j in vdb_jahre():
             self._versp_combo_jahr.addItem(str(j), j)
+        # Standardmäßig aktuelles Jahr vorauswählen (sofern kein anderes aktiv ist)
+        aktuelles_jahr = _dt.today().year
+        ziel = current if current is not None else aktuelles_jahr
         for i in range(self._versp_combo_jahr.count()):
-            if self._versp_combo_jahr.itemData(i) == current:
+            if self._versp_combo_jahr.itemData(i) == ziel:
                 self._versp_combo_jahr.setCurrentIndex(i)
                 break
         self._versp_combo_jahr.blockSignals(False)
@@ -2801,13 +3122,14 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._btn_neu.setVisible(not is_versp and not is_psa and not is_schulung and not is_stell and not is_antrag and not is_dienstanw)
         self._tabs.setTabVisible(0, not is_versp and not is_psa and not is_schulung)  # Dateien-Tab ausblenden
         self._tabs.setTabVisible(2, is_versp)
-        self._tabs.setTabVisible(3, is_psa)
-        self._tabs.setTabVisible(4, False)
+        self._tabs.setTabVisible(3, is_versp)
+        self._tabs.setTabVisible(4, is_psa)
         self._tabs.setTabVisible(5, False)
-        self._tabs.setTabVisible(6, is_schulung)
+        self._tabs.setTabVisible(6, False)
+        self._tabs.setTabVisible(7, is_schulung)
         self._antraege_panel.setVisible(is_antrag)
         if is_psa:
-            self._tabs.setCurrentIndex(3)
+            self._tabs.setCurrentIndex(4)
             self._psa_jahre_aktualisieren()
             self._psa_lade()
         elif is_versp:
@@ -2815,7 +3137,7 @@ class MitarbeiterDokumenteWidget(QWidget):
             self._versp_jahre_aktualisieren()
             self._versp_lade()
         elif is_schulung:
-            self._tabs.setCurrentIndex(6)
+            self._tabs.setCurrentIndex(7)
             self._schulung_jahre_aktualisieren()
             self._schulung_lade()
         else:
@@ -3259,6 +3581,8 @@ class MitarbeiterDokumenteWidget(QWidget):
             self._versp_jahre_aktualisieren()
             self._versp_lade()
         elif idx == 3:
+            self._versp_statistik_lade()
+        elif idx == 4:
             self._psa_jahre_aktualisieren()
             self._psa_lade()
 
