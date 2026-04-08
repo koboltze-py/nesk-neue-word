@@ -466,42 +466,98 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
             _schreibe_sheet(ws, spalten, zeilen, "1565A8", "FFFFFF", "F5F5F5",
                             f"⏰  Verspätungen ({n} Einträge)", zeitraum)
 
-        # ── Schulungen ──────────────────────────────────────────────────────
+        # ── Schulungen (je Tab: ZÜP / EH / Refresher / Sonstiges) ──────────
         elif typ == "schulungen":
             from functions.schulungen_db import SCHULUNGSTYPEN_CFG
-            ws = wb.create_sheet("Schulungen")
-            spalten = [
-                ("Mitarbeiter", 26), ("Schulungsart", 22), ("Gültig bis", 13),
-                ("Tage Rest", 11), ("Status", 12),
-            ]
-            zeilen = []
-            tage_werte: list[int | None] = []
-            heute = date.today()
-            for e in eintr:
-                cfg      = SCHULUNGSTYPEN_CFG.get(e.get("schulungstyp", ""), {})
-                anzeige  = cfg.get("anzeige", e.get("schulungstyp", ""))
-                name     = f"{e.get('nachname', '')} {e.get('vorname', '')}".strip()
-                gb       = e.get("gueltig_bis", "")
-                tage_rest_val: int | None = None
-                try:
-                    d, m, y = gb.split(".")
-                    gb_date = date(int(y), int(m), int(d))
-                    tage_rest_val = (gb_date - heute).days
-                    tage_txt = f"{tage_rest_val}" if tage_rest_val >= 0 else f"ÜBERFÄLLIG {-tage_rest_val}d"
-                except Exception:
-                    tage_txt = ""
-                tage_werte.append(tage_rest_val)
-                zeilen.append([name, anzeige, gb, tage_txt, e.get("status", "gültig")])
-            _schreibe_sheet(ws, spalten, zeilen, "6A1B9A", "FFFFFF", "F5F5F5",
-                            f"🎓  Schulungen ({n} Einträge)", zeitraum)
-            # Spalte 4 (Tage Rest) < 48 Tage gelb hinterlegen
-            _fill_gelb  = PatternFill("solid", fgColor="FFFF00")
-            _fill_rot   = PatternFill("solid", fgColor="FFCDD2")
-            _daten_start = 4  # Zeile 1=Titel, 2=Zeitraum, 3=Header, ab 4 Daten
-            for r_off, tage_val in enumerate(tage_werte):
-                if tage_val is not None and tage_val < 48:
-                    cell = ws.cell(row=_daten_start + r_off, column=4)
-                    cell.fill = _fill_rot if tage_val < 0 else _fill_gelb
+            sub_typen = ab.get("sub_typen", {})
+            heute      = date.today()
+            _fill_gelb = PatternFill("solid", fgColor="FFFF00")
+            _fill_rot  = PatternFill("solid", fgColor="FFCDD2")
+            _fill_warn = PatternFill("solid", fgColor="FFCC80")
+            _DS = 4  # Datenzeilen starten ab Zeile 4 (1=Titel,2=Zeitraum,3=Header)
+
+            def _schreibe_schulungs_sheet(
+                ws_, eintr_, sheet_titel, sheet_zeitraum, gelb_tage, hdr_color, zeige_3mon=False
+            ):
+                if zeige_3mon:
+                    sp_ = [
+                        ("Mitarbeiter", 28), ("Gültig bis", 13),
+                        ("Tage Rest", 11), ("< 3 Monate?", 13), ("Status", 12),
+                    ]
+                else:
+                    sp_ = [
+                        ("Mitarbeiter", 26), ("Schulungsart", 22), ("Gültig bis", 13),
+                        ("Tage Rest", 11), ("Status", 12),
+                    ]
+                ze_ = []
+                tv_ = []
+                for e_ in eintr_:
+                    cfg_ = SCHULUNGSTYPEN_CFG.get(e_.get("schulungstyp", ""), {})
+                    az_  = cfg_.get("anzeige", e_.get("schulungstyp", ""))
+                    nm_  = f"{e_.get('nachname', '')} {e_.get('vorname', '')}".strip()
+                    gb_  = e_.get("gueltig_bis", "")
+                    tv_val = None
+                    try:
+                        _d, _m, _y = gb_.split(".")
+                        gb_d = date(int(_y), int(_m), int(_d))
+                        tv_val = (gb_d - heute).days
+                        tt_ = f"{tv_val}" if tv_val >= 0 else f"ÜBERFÄLLIG {-tv_val}d"
+                    except Exception:
+                        tt_ = ""
+                    tv_.append(tv_val)
+                    if zeige_3mon:
+                        warn_ = "⚠  Ja" if tv_val is not None and tv_val <= 90 else "✓  Nein"
+                        ze_.append([nm_, gb_, tt_, warn_, e_.get("status", "gültig")])
+                    else:
+                        ze_.append([nm_, az_, gb_, tt_, e_.get("status", "gültig")])
+                _schreibe_sheet(ws_, sp_, ze_, hdr_color, "FFFFFF", "F5F5F5",
+                                sheet_titel, sheet_zeitraum)
+                tage_col_ = 3 if zeige_3mon else 4
+                for ro_, t_ in enumerate(tv_):
+                    if t_ is not None and t_ < gelb_tage:
+                        ws_.cell(row=_DS + ro_, column=tage_col_).fill = (
+                            _fill_rot if t_ < 0 else _fill_gelb
+                        )
+                if zeige_3mon:
+                    for ro_, t_ in enumerate(tv_):
+                        if t_ is not None and 0 <= t_ <= 90:
+                            ws_.cell(row=_DS + ro_, column=4).fill = _fill_warn
+
+            if "ZÜP" in sub_typen:
+                ws_z = wb.create_sheet("ZÜP")
+                _schreibe_schulungs_sheet(
+                    ws_z, sub_typen["ZÜP"],
+                    f"🔐  ZÜP ({len(sub_typen['ZÜP'])} Einträge)",
+                    "Gesamter Erfassungszeitraum",
+                    gelb_tage=100, hdr_color="4A148C", zeige_3mon=True,
+                )
+            if "EH" in sub_typen:
+                ws_e = wb.create_sheet("EH")
+                _schreibe_schulungs_sheet(
+                    ws_e, sub_typen["EH"],
+                    f"🏥  Erste Hilfe ({len(sub_typen['EH'])} Einträge)",
+                    zeitraum, gelb_tage=48, hdr_color="6A1B9A",
+                )
+            if "Refresher" in sub_typen:
+                ws_r = wb.create_sheet("Refresher")
+                _schreibe_schulungs_sheet(
+                    ws_r, sub_typen["Refresher"],
+                    f"🔄  Refresher ({len(sub_typen['Refresher'])} Einträge)",
+                    zeitraum, gelb_tage=48, hdr_color="7B1FA2",
+                )
+            if "Sonstiges" in sub_typen:
+                ws_s = wb.create_sheet("Sonstiges")
+                _schreibe_schulungs_sheet(
+                    ws_s, sub_typen["Sonstiges"],
+                    f"📊  Sonstiges ({len(sub_typen['Sonstiges'])} Einträge)",
+                    zeitraum, gelb_tage=48, hdr_color="9C27B0",
+                )
+            if not sub_typen:  # Fallback (Altdaten ohne sub_typen)
+                ws = wb.create_sheet("Schulungen")
+                _schreibe_schulungs_sheet(
+                    ws, eintr, f"🎓  Schulungen ({n} Einträge)",
+                    zeitraum, gelb_tage=48, hdr_color="6A1B9A",
+                )
 
         # ── Einsätze ────────────────────────────────────────────────────────
         elif typ == "einsaetze":
@@ -684,21 +740,40 @@ class BerichtWidget(QWidget):
             try:
                 from functions.schulungen_db import lade_eintraege_fuer_export
                 aktive_typen = self._panel_schu.get_aktive_typen()
-                gefiltert = lade_eintraege_fuer_export(
-                    self._panel_schu.von_datum(),
-                    self._panel_schu.bis_datum(),
-                    schulungstypen=aktive_typen,
-                )
-                if self._panel_schu.abgelaufene_ausschliessen():
-                    gefiltert = [e for e in gefiltert if e.get("_tage_rest", -1) >= 0]
-                if self._panel_schu.nur_bald_faellig():
-                    gefiltert = [e for e in gefiltert if 0 <= e.get("_tage_rest", 999) <= 180]
+                _VON  = self._panel_schu.von_datum()
+                _BIS  = self._panel_schu.bis_datum()
+                _ALLE = aktive_typen is None
+
+                def _lade(typen: list[str], von, bis) -> list[dict]:
+                    try:
+                        res = lade_eintraege_fuer_export(von, bis, schulungstypen=typen)
+                        if self._panel_schu.abgelaufene_ausschliessen():
+                            res = [e for e in res if e.get("_tage_rest", -1) >= 0]
+                        if self._panel_schu.nur_bald_faellig():
+                            res = [e for e in res if 0 <= e.get("_tage_rest", 999) <= 180]
+                        return res
+                    except Exception:
+                        return []
+
+                # ZÜP: immer vollständiger Zeitraum (von Anfang der Erfassung)
+                sub_typen: dict[str, list[dict]] = {}
+                _FRUEH = date(2000, 1, 1)
+                _SPAET = date(2099, 12, 31)
+                if _ALLE or "ZÜP" in aktive_typen:
+                    sub_typen["ZÜP"] = _lade(["ZÜP"], _FRUEH, _SPAET)
+                for key in ("EH", "Refresher", "Sonstiges"):
+                    if _ALLE or key in aktive_typen:
+                        sub_typen[key] = _lade([key], _VON, _BIS)
+
+                gefiltert = [e for lst in sub_typen.values() for e in lst]
             except Exception:
                 gefiltert = []
+                sub_typen = {}
             abschnitte.append({
                 "typ": "schulungen", "titel": "Schulungen",
                 "eintraege": gefiltert, "zeitraum": self._panel_schu.zeitraum_label(),
                 "farbe_ak": _FARBEN["schulungen"][0], "farbe_bg": _FARBEN["schulungen"][1],
+                "sub_typen": sub_typen,
             })
 
         if self._panel_eins.aktiv():
