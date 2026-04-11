@@ -832,6 +832,14 @@ def pull_table(db_path: str, table: str) -> int:
     if not rows:
         return 0
 
+    # Werte-Bereinigung: alte funktion-Werte aus Turso auf neue Bezeichner mappen
+    _FUNKTION_MAP = {"stamm": "Schichtleiter", "dispo": "Dispo"}
+    if table == "mitarbeiter" and rows and "funktion" in rows[0]:
+        for r in rows:
+            if r.get("funktion") in _FUNKTION_MAP:
+                r["funktion"] = _FUNKTION_MAP[r["funktion"]]
+
+    conn = None
     try:
         conn = sqlite3.connect(db_path, timeout=5, check_same_thread=False)
         conn.execute("PRAGMA journal_mode = WAL")
@@ -841,11 +849,13 @@ def pull_table(db_path: str, table: str) -> int:
         sql = f'INSERT OR REPLACE INTO "{table}" ({col_str}) VALUES ({placeholders})'
         conn.executemany(sql, [[r.get(c) for c in cols] for r in rows])
         conn.commit()
-        conn.close()
         return len(rows)
     except Exception as e:
         print(f"[Turso] Pull-Fehler {table} ({db_file}): {e}")
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def pull_deletions(since_ts: str = "1970-01-01T00:00:00") -> int:

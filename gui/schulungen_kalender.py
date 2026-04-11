@@ -406,8 +406,7 @@ class NeuerMitarbeiterDialog(QDialog):
 
         self._personalnr  = QLineEdit(); self._personalnr.setPlaceholderText("Optional")
         self._funktion    = QComboBox()
-        self._funktion.setEditable(True)
-        self._funktion.addItems(["PRM", "Schichtleiter", "SB", "Fahrer", "Sonstiges"])
+        self._funktion.addItems(["Schichtleiter", "Dispo", "Betreuer"])
         self._position    = QComboBox()
         self._position.setEditable(True)
         pos = lade_positionen_ma_db()
@@ -499,7 +498,11 @@ class NeuerMitarbeiterDialog(QDialog):
         """Gibt Schulungseinträge-Rohdaten zurück (gueltig_bis als String)."""
         from functions.schulungen_db import _berechne_gueltig_bis, _datum_str
         from datetime import date as _date
-        def _d(w): return w.date() if w.date() != QDate(2000, 1, 1) else None
+        def _d(w):
+            if w is None:
+                return None
+            d = w.date()
+            return d if d != QDate(2000, 1, 1) else None
         def _ds(qd): return _date(qd.year(), qd.month(), qd.day()) if qd else None
 
         eintraege = {}
@@ -1460,6 +1463,8 @@ class _MitarbeiterListeWidget(QWidget):
         self._tbl.verticalHeader().setVisible(False)
         self._tbl.setStyleSheet("font-size:12px;")
         self._tbl.doubleClicked.connect(lambda idx: self._zeige_detail(idx.row()))
+        self._tbl.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tbl.customContextMenuRequested.connect(self._kontext_menu)
         v.addWidget(self._tbl, 1)
 
         hint = QLabel("💡 Doppelklick auf einen Mitarbeiter → alle 14 Schulungstypen anzeigen")
@@ -1708,6 +1713,46 @@ class _MitarbeiterListeWidget(QWidget):
         self._suche.clear()
         self._filter_status.setCurrentIndex(0)
         self._filter_typ.setCurrentIndex(0)
+
+    def _kontext_menu(self, pos):
+        row = self._tbl.rowAt(pos.y())
+        if row < 0:
+            return
+        item = self._tbl.item(row, 0)
+        if not item:
+            return
+        ma = item.data(Qt.ItemDataRole.UserRole)
+        if not ma:
+            return
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self._tbl)
+        akt_detail = menu.addAction("🎓  Schulungen anzeigen")
+        menu.addSeparator()
+        akt_loeschen = menu.addAction("🗑️  Mitarbeiter löschen")
+        akt_loeschen.setObjectName("loeschen")
+        aktion = menu.exec(self._tbl.viewport().mapToGlobal(pos))
+        if aktion is akt_detail:
+            self._zeige_detail(row)
+        elif aktion is akt_loeschen:
+            self._loesche_mitarbeiter(ma)
+
+    def _loesche_mitarbeiter(self, ma: dict):
+        name = f"{ma.get('nachname', '')}, {ma.get('vorname', '')}".strip(", ")
+        antwort = QMessageBox.question(
+            self, "Mitarbeiter löschen",
+            f"Soll <b>{name}</b> wirklich gelöscht werden?<br>"
+            "Alle Schulungseinträge dieses Mitarbeiters werden ebenfalls entfernt.<br><br>"
+            "Diese Aktion kann nicht rückgängig gemacht werden.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if antwort != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from functions.schulungen_db import loesche_mitarbeiter
+            loesche_mitarbeiter(ma["id"])
+            self.aktualisieren()
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler beim Löschen", str(exc))
 
 
 # ─── Haupt-Widget ─────────────────────────────────────────────────────────────
@@ -1973,11 +2018,11 @@ class SchulungenKalenderWidget(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        stamm  = dlg.get_stamm_daten()
-        schul  = dlg.get_schulungs_daten()
-        ma_dat = dlg.get_ma_db_daten()
-
         try:
+            stamm  = dlg.get_stamm_daten()
+            schul  = dlg.get_schulungs_daten()
+            ma_dat = dlg.get_ma_db_daten()
+
             # 1. Mitarbeiter-Stamm in schulungen.db
             ma_id = speichere_mitarbeiter(stamm)
 
