@@ -3,11 +3,12 @@ Dienstplan-Widget
 Schichten anzeigen, hinzufügen, bearbeiten, löschen
 Excel-Import und Word-Export (Stärkemeldung)
 """
+import json
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -141,6 +142,21 @@ _STANDARD_DIENSTE = frozenset({'N', 'N10', 'T', 'T10', 'DT', 'DT3', 'DN', 'DN3'}
 _TAG_DIENSTE   = frozenset({'T', 'T10', 'T8', 'DT', 'DT3'})
 _NACHT_DIENSTE = frozenset({'N', 'N10', 'NF', 'DN', 'DN3'})
 
+_GEZAEHLT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "json", "sl_gezaehlt.json"
+)
+
+
+def _ist_letzte_3_tage(datum_str: str) -> bool:
+    """Prüft ob das Datum (DD.MM.YYYY) in den letzten 3 Tagen liegt."""
+    try:
+        d = datetime.strptime(datum_str, "%d.%m.%Y").date()
+        grenze = (datetime.today() - timedelta(days=3)).date()
+        return d >= grenze
+    except (ValueError, TypeError):
+        return False
+
 
 class ExportDialog(QDialog):
     """Dialog für Word-Export: Zeitraum, PAX-Zahl, Ausgabepfad, Sonderdienst-Filter."""
@@ -154,11 +170,12 @@ class ExportDialog(QDialog):
     def __init__(self, parsed_data: dict | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Word-Export  -  Stärkemeldung")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(460)
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(560)
         self._parsed_data = parsed_data or {}
         self.result: dict | None = None
-        self._checkboxen: list[tuple] = []   # (QCheckBox, vollname_lower)
+        self._checkboxen: list[tuple] = []        # (QCheckBox, vollname_lower)
+        self._sl_checkboxen: list[tuple] = []     # (QCheckBox, typ, entry_id, bereits_gezaehlt)
         self._build_ui()
 
     def _build_ui(self):
@@ -203,6 +220,119 @@ class ExportDialog(QDialog):
         form.addRow("SL Tag (Name):",   self._sl_tag)
         form.addRow("SL Nacht (Name):", self._sl_nacht)
         layout.addLayout(form)
+
+        # -- Letzte 3 Tage: Einsätze & Patienten Station ---------------
+        sep_sl = QFrame()
+        sep_sl.setFrameShape(QFrame.Shape.HLine)
+        sep_sl.setStyleSheet("color: #ddd;")
+        layout.addWidget(sep_sl)
+
+        sl_lbl = QLabel("📋  Letzte 3 Tage – Einsätze & Patienten Station")
+        sl_lbl.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        sl_lbl.setStyleSheet("color: #333; padding: 2px 0;")
+        layout.addWidget(sl_lbl)
+
+        hint_lbl = QLabel("  Auswahl → zählt zu SL-Einsätze  |  Grau = bereits gezählt")
+        hint_lbl.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(hint_lbl)
+
+        sl_scroll = QScrollArea()
+        sl_scroll.setWidgetResizable(True)
+        sl_scroll.setMaximumHeight(170)
+        sl_scroll.setStyleSheet(
+            "QScrollArea { border: 1px solid #dce8f5; border-radius: 4px; }"
+        )
+        sl_inner        = QWidget()
+        sl_inner_layout = QVBoxLayout(sl_inner)
+        sl_inner_layout.setSpacing(3)
+        sl_inner_layout.setContentsMargins(8, 6, 8, 6)
+
+        gezaehlt = self._lade_gezaehlt()
+        hatte_eintraege = False
+
+        # Einsätze letzter 3 Tage
+        try:
+            from gui.dienstliches import lade_einsaetze as _le
+            alle_e = _le()
+            letzte_e = [e for e in alle_e if _ist_letzte_3_tage(e.get("datum", ""))]
+            letzte_e.sort(
+                key=lambda e: (e.get("datum", "")[-4:] + e.get("datum", "")[3:5] +
+                               e.get("datum", "")[:2] + e.get("uhrzeit", "")),
+                reverse=True,
+            )
+            if letzte_e:
+                hatte_eintraege = True
+                e_hdr = QLabel("🚨  Einsätze:")
+                e_hdr.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                e_hdr.setStyleSheet("color: #c0392b;")
+                sl_inner_layout.addWidget(e_hdr)
+                for e in letzte_e:
+                    eid = e.get("id")
+                    bereits = eid in gezaehlt["einsaetze"]
+                    stichwort = (e.get("einsatzstichwort") or e.get("einsatzort") or "—")[:35]
+                    text = f"  {e.get('datum','')} {e.get('uhrzeit','')}  {stichwort}"
+                    if bereits:
+                        text += "  ✓ bereits gezählt"
+                    cb = QCheckBox(text)
+                    cb.setFont(QFont("Arial", 9))
+                    if bereits:
+                        cb.setChecked(True)
+                        cb.setEnabled(False)
+                        cb.setStyleSheet("color: #aaa;")
+                    else:
+                        cb.toggled.connect(self._sl_toggle)
+                    sl_inner_layout.addWidget(cb)
+                    self._sl_checkboxen.append((cb, "einsaetze", eid, bereits))
+        except Exception:
+            pass
+
+        # Patienten letzter 3 Tage
+        try:
+            from gui.dienstliches import lade_patienten as _lp
+            alle_p = _lp()
+            letzte_p = [p for p in alle_p if _ist_letzte_3_tage(p.get("datum", ""))]
+            letzte_p.sort(
+                key=lambda p: (p.get("datum", "")[-4:] + p.get("datum", "")[3:5] +
+                               p.get("datum", "")[:2] + p.get("uhrzeit", "")),
+                reverse=True,
+            )
+            if letzte_p:
+                hatte_eintraege = True
+                p_hdr = QLabel("🏥  Patienten Station:")
+                p_hdr.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                p_hdr.setStyleSheet("color: #2980b9;")
+                sl_inner_layout.addWidget(p_hdr)
+                for p in letzte_p:
+                    pid = p.get("id")
+                    bereits = pid in gezaehlt["patienten"]
+                    name = (p.get("patient_name") or "—")[:20]
+                    beschwerde = (p.get("beschwerde_art") or p.get("symptome") or "")[:25]
+                    text = f"  {p.get('datum','')} {p.get('uhrzeit','')}  {name}"
+                    if beschwerde:
+                        text += f"  {beschwerde}"
+                    if bereits:
+                        text += "  ✓ bereits gezählt"
+                    cb = QCheckBox(text)
+                    cb.setFont(QFont("Arial", 9))
+                    if bereits:
+                        cb.setChecked(True)
+                        cb.setEnabled(False)
+                        cb.setStyleSheet("color: #aaa;")
+                    else:
+                        cb.toggled.connect(self._sl_toggle)
+                    sl_inner_layout.addWidget(cb)
+                    self._sl_checkboxen.append((cb, "patienten", pid, bereits))
+        except Exception:
+            pass
+
+        if not hatte_eintraege:
+            leer_lbl = QLabel("  Keine Einträge in den letzten 3 Tagen gefunden.")
+            leer_lbl.setStyleSheet("color: #aaa; font-style: italic; font-size: 10px;")
+            sl_inner_layout.addWidget(leer_lbl)
+
+        sl_inner_layout.addStretch()
+        sl_scroll.setWidget(sl_inner)
+        layout.addWidget(sl_scroll)
 
         # -- Format-Auswahl -------------------------------------------
         sep_fmt = QFrame()
@@ -299,6 +429,40 @@ class ExportDialog(QDialog):
         btn_row.addWidget(export_btn)
         layout.addLayout(btn_row)
 
+    # -- Hilfsmethoden SL-Einsätze-Zählung -----------------------------------
+
+    def _sl_toggle(self, checked: bool):
+        """Checkbox-Toggle: SL-Einsätze SpinBox um 1 erhöhen/verringern."""
+        if checked:
+            self._einsaetze.setValue(self._einsaetze.value() + 1)
+        else:
+            self._einsaetze.setValue(max(0, self._einsaetze.value() - 1))
+
+    def _lade_gezaehlt(self) -> dict:
+        """Bereits gezählte IDs aus JSON laden."""
+        try:
+            with open(_GEZAEHLT_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {
+                "einsaetze": set(data.get("einsaetze", [])),
+                "patienten": set(data.get("patienten", [])),
+            }
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {"einsaetze": set(), "patienten": set()}
+
+    def _speichere_gezaehlt(self, neue_einsatz_ids: set, neue_patienten_ids: set):
+        """Neu gezählte IDs zur Persistenz-Datei hinzufügen."""
+        best = self._lade_gezaehlt()
+        best["einsaetze"].update(neue_einsatz_ids)
+        best["patienten"].update(neue_patienten_ids)
+        daten = {
+            "einsaetze": sorted(best["einsaetze"]),
+            "patienten": sorted(best["patienten"]),
+        }
+        os.makedirs(os.path.dirname(_GEZAEHLT_PATH), exist_ok=True)
+        with open(_GEZAEHLT_PATH, "w", encoding="utf-8") as f:
+            json.dump(daten, f, indent=2, ensure_ascii=False)
+
     def _warn_klassisch(self, checked: bool):
         if not checked:
             return
@@ -361,6 +525,18 @@ class ExportDialog(QDialog):
             'ausgeschlossene_vollnamen': ausgeschlossene,
             'format':                  'dashboard' if self._rb_dashboard.isChecked() else 'klassisch',
         }
+
+        # Neu ausgewählte Einsätze/Patienten als "gezählt" persistieren
+        neu_e = {eid for cb, typ, eid, pre in self._sl_checkboxen
+                 if typ == "einsaetze" and not pre and cb.isChecked()}
+        neu_p = {eid for cb, typ, eid, pre in self._sl_checkboxen
+                 if typ == "patienten" and not pre and cb.isChecked()}
+        if neu_e or neu_p:
+            try:
+                self._speichere_gezaehlt(neu_e, neu_p)
+            except Exception:
+                pass
+
         self.accept()
 
 
