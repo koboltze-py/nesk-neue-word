@@ -1,4 +1,4 @@
-"""
+﻿"""
 Mitarbeiter-Dokumente Widget
 Öffnen, Bearbeiten und Erstellen von Mitarbeiter-Dokumenten
 mit einheitlicher DRK-Kopf-/Fußzeile
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QLineEdit, QTextEdit, QComboBox, QDateEdit,
     QMessageBox, QFrame, QScrollArea, QSizePolicy, QInputDialog,
     QFileDialog, QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
-    QTimeEdit, QTabWidget, QSpinBox, QCompleter
+    QTimeEdit, QTabWidget, QSpinBox, QCompleter, QGridLayout
 )
 from PySide6.QtCore import Qt, QDate, QSize, QTime, QStringListModel
 from PySide6.QtGui import QFont, QColor, QIcon
@@ -656,7 +656,7 @@ class _VerspaetungDialog(QDialog):
         self._ma_combo = QComboBox()
         self._ma_combo.setEditable(True)
         self._ma_combo.setMinimumWidth(260)
-        self._ma_combo.lineEdit().setPlaceholderText("Name eingeben …")
+        self._ma_combo.lineEdit().setPlaceholderText("Nachname, Vorname")
         self._ma_namen: list[str] = []
         try:
             from functions.mitarbeiter_functions import lade_mitarbeiter_namen
@@ -856,19 +856,42 @@ class _VerspaetungDialog(QDialog):
                     return name
         return eingabe
 
+    def _valide_ma_format(self, ma: str) -> bool:
+        """Prüft ob der Name im Format 'Nachname, Vorname' vorliegt."""
+        if "," not in ma:
+            return False
+        teile = [t.strip() for t in ma.split(",", 1)]
+        return all(teile)
+
     def _on_nur_speichern(self):
-        ma = self._ma_combo.currentText().strip()
+        ma = self._normalise_ma_name(self._ma_combo.currentText().strip())
         if not ma:
             QMessageBox.warning(self, "Pflichtfeld", "Bitte Mitarbeiter angeben.")
             return
+        if not self._valide_ma_format(ma):
+            QMessageBox.warning(
+                self, "Format ungültig",
+                "Bitte den Namen im Format\u00a0\u00bb Nachname, Vorname \u00ab eingeben.\n"
+                "Beispiel: Müller, Thomas"
+            )
+            return
+        self._ma_combo.setCurrentText(ma)
         self._nur_speichern = True
         self.accept()
 
     def _on_accept(self):
-        ma = self._ma_combo.currentText().strip()
+        ma = self._normalise_ma_name(self._ma_combo.currentText().strip())
         if not ma:
             QMessageBox.warning(self, "Pflichtfeld", "Bitte Mitarbeiter angeben.")
             return
+        if not self._valide_ma_format(ma):
+            QMessageBox.warning(
+                self, "Format ungültig",
+                "Bitte den Namen im Format\u00a0\u00bb Nachname, Vorname \u00ab eingeben.\n"
+                "Beispiel: Müller, Thomas"
+            )
+            return
+        self._ma_combo.setCurrentText(ma)
         self._nur_speichern = False
         self.accept()
 
@@ -1390,6 +1413,141 @@ def _verspaetungen_als_excel_speichern(eintraege: list[dict], pfad: str) -> None
 
     os.makedirs(os.path.dirname(pfad), exist_ok=True)
     wb.save(pfad)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Namens-Ähnlichkeits-Prüfung für Statistik
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _pruefe_aehnliche_namen(eintraege: list[dict], schwellwert: float = 0.82) -> list[tuple]:
+    """
+    Vergleicht alle Mitarbeiter-Namen miteinander und gibt Paare zurück,
+    die sich sehr ähnlich sind (mögliche Tippfehler / Duplikate).
+    Rückgabe: [(name_a, name_b, ähnlichkeit), ...]
+    """
+    import difflib
+    namen = sorted({e.get("mitarbeiter", "").strip() for e in eintraege if e.get("mitarbeiter", "").strip()})
+    paare = []
+    for i, a in enumerate(namen):
+        for b in namen[i + 1:]:
+            ratio = difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+            if ratio >= schwellwert:
+                paare.append((a, b, round(ratio * 100)))
+    return paare
+
+
+class _AehnlicheNamenDialog(QDialog):
+    """
+    Zeigt ähnliche Namenspaare und lässt den Nutzer auswählen,
+    ob Namen zusammengeführt werden sollen. Gibt ein Namens-Mapping zurück.
+    """
+
+    def __init__(self, paare: list[tuple], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚠️  Ähnliche Namen gefunden")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(300)
+        self._paare  = paare
+        self._combos: list[QComboBox] = []
+        self._build_ui()
+
+    def _build_ui(self):
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+        v.setContentsMargins(18, 16, 18, 14)
+
+        titel = QLabel("⚠️  Mögliche Duplikate in der Statistik")
+        titel.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        titel.setStyleSheet("color:#b71c1c;")
+        v.addWidget(titel)
+
+        hinweis = QLabel(
+            "Folgende Namen ähneln sich stark und könnten dieselbe Person sein.\n"
+            "Bitte für jedes Paar festlegen, ob sie zusammengeführt werden sollen:"
+        )
+        hinweis.setWordWrap(True)
+        hinweis.setStyleSheet("color:#444; font-size:11px;")
+        v.addWidget(hinweis)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(320)
+        inner = QWidget()
+        grid = QGridLayout(inner)
+        grid.setSpacing(8)
+        grid.setContentsMargins(4, 4, 4, 4)
+
+        # Kopfzeile
+        for col, txt in enumerate(["Name A", "Name B", "Ähnlichkeit", "Zusammenführen als"]):
+            lbl = QLabel(txt)
+            lbl.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+            lbl.setStyleSheet("color:#1565c0;")
+            grid.addWidget(lbl, 0, col)
+
+        for row, (a, b, pct) in enumerate(self._paare, start=1):
+            grid.addWidget(QLabel(a), row, 0)
+            grid.addWidget(QLabel(b), row, 1)
+            pct_lbl = QLabel(f"{pct} %")
+            pct_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(pct_lbl, row, 2)
+
+            cb = QComboBox()
+            cb.addItems(["— Getrennt lassen —", f"→ {a}", f"→ {b}"])
+            cb.setProperty("paar_idx", row - 1)
+            grid.addWidget(cb, row, 3)
+            self._combos.append(cb)
+
+        scroll.setWidget(inner)
+        v.addWidget(scroll)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_ok = QPushButton("✅  Weiter")
+        btn_ok.setStyleSheet(
+            "QPushButton{background:#2e7d32;color:white;border-radius:4px;"
+            "padding:6px 18px;font-weight:bold;}"
+            "QPushButton:hover{background:#1b5e20;}"
+        )
+        btn_ok.clicked.connect(self.accept)
+        btn_ab = QPushButton("Abbrechen")
+        btn_ab.setStyleSheet(
+            "QPushButton{background:#546e7a;color:white;border-radius:4px;"
+            "padding:6px 14px;}"
+            "QPushButton:hover{background:#455a64;}"
+        )
+        btn_ab.clicked.connect(self.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+        btn_row.addWidget(btn_ab)
+        v.addLayout(btn_row)
+
+    def get_name_mapping(self) -> dict[str, str]:
+        """Gibt {alter_name: neuer_name} zurück für alle Zusammenführungs-Entscheidungen."""
+        mapping: dict[str, str] = {}
+        for idx, cb in enumerate(self._combos):
+            auswahl = cb.currentIndex()
+            if auswahl == 0:
+                continue  # getrennt lassen
+            a, b, _ = self._paare[idx]
+            if auswahl == 1:
+                mapping[b] = a   # b → a
+            else:
+                mapping[a] = b   # a → b
+        return mapping
+
+
+def _wende_name_mapping_an(eintraege: list[dict], mapping: dict[str, str]) -> list[dict]:
+    """Ersetzt Mitarbeiter-Namen in den Einträgen entsprechend dem Mapping."""
+    if not mapping:
+        return eintraege
+    result = []
+    for e in eintraege:
+        ma = e.get("mitarbeiter", "")
+        if ma in mapping:
+            e = dict(e)
+            e["mitarbeiter"] = mapping[ma]
+        result.append(e)
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2158,13 +2316,6 @@ class MitarbeiterDokumenteWidget(QWidget):
         self._versp_btn_bearbeiten.setToolTip("Eintrag bearbeiten und Dokument neu erstellen")
         self._versp_btn_bearbeiten.clicked.connect(self._verspaetung_bearbeiten)
         vbtn_row.addWidget(self._versp_btn_bearbeiten)
-
-        self._versp_btn_mail = _btn("📧  Per E-Mail senden", "#5c35cc", "#4a2aa0")
-        self._versp_btn_mail.setEnabled(False)
-        self._versp_btn_mail.setToolTip("Outlook-Entwurf mit dem Dokument als Anhang erstellen")
-        self._versp_btn_mail.clicked.connect(self._verspaetung_mail_senden)
-        vbtn_row.addWidget(self._versp_btn_mail)
-
         self._versp_btn_ordner = _btn_light("📁  Ordner öffnen")
         self._versp_btn_ordner.setToolTip("Word-Ordner mit den Verspätungs-Dokumenten öffnen")
         self._versp_btn_ordner.clicked.connect(self._verspaetung_ordner_oeffnen)
@@ -2865,7 +3016,7 @@ class MitarbeiterDokumenteWidget(QWidget):
     def _versp_auswahl_geaendert(self):
         hat = bool(self._versp_aktuell_eintrag())
         for btn in (self._versp_btn_oeffnen, self._versp_btn_bearbeiten,
-                    self._versp_btn_loeschen, self._versp_btn_mail):
+                    self._versp_btn_loeschen):
             btn.setEnabled(hat)
 
     def _versp_aktuell_eintrag(self) -> dict | None:
@@ -3013,6 +3164,15 @@ class MitarbeiterDokumenteWidget(QWidget):
         ]
         gefiltert.sort(key=lambda e: _parse(e.get("datum", "")) or _dt.min, reverse=True)
 
+        # ── Namens-Ähnlichkeits-Prüfung ───────────────────────────────────
+        paare = _pruefe_aehnliche_namen(gefiltert)
+        if paare:
+            namen_dlg = _AehnlicheNamenDialog(paare, self)
+            if namen_dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            mapping = namen_dlg.get_name_mapping()
+            gefiltert = _wende_name_mapping_an(gefiltert, mapping)
+
         try:
             _verspaetungen_als_excel_speichern(gefiltert, speicherpfad)
         except Exception as exc:
@@ -3033,6 +3193,32 @@ class MitarbeiterDokumenteWidget(QWidget):
     def _verspaetung_excel_mail_senden(self):
         """Excel-Datei via Explorer auswählen und als Outlook-Entwurf an die Station senden."""
         from PySide6.QtWidgets import QFileDialog
+        from datetime import datetime as _dt
+
+        # ── Namens-Ähnlichkeits-Prüfung gegen aktuelle DB-Einhalte ──────────
+        try:
+            alle = lade_verspaetungen()
+        except Exception:
+            alle = []
+        if alle:
+            paare = _pruefe_aehnliche_namen(alle)
+            if paare:
+                namen_dlg = _AehnlicheNamenDialog(paare, self)
+                namen_dlg.setWindowTitle("⚠️  Ähnliche Namen in den aktuellen Daten")
+                # Hinweis ergänzen: Datei wurde bereits erstellt, nur Warnung
+                hinweis_extra = QLabel(
+                    "Hinweis: Da eine bereits gespeicherte Excel-Datei versendet wird,\n"
+                    "kann die Statistik darin nicht mehr geändert werden.\n"
+                    "Zum Korrigieren zuerst einen neuen Excel-Export durchführen."
+                )
+                hinweis_extra.setWordWrap(True)
+                hinweis_extra.setStyleSheet(
+                    "color:#b71c1c; font-size:11px; font-style:italic;"
+                    "background:#fff3e0; padding:6px; border-radius:4px;"
+                )
+                namen_dlg.layout().insertWidget(2, hinweis_extra)
+                if namen_dlg.exec() != QDialog.DialogCode.Accepted:
+                    return
 
         # ── Excel-Datei auswählen ─────────────────────────────────────────────
         start_dir = _EXCEL_STANDARD_DIR if os.path.isdir(_EXCEL_STANDARD_DIR) else ""
@@ -3588,7 +3774,6 @@ class MitarbeiterDokumenteWidget(QWidget):
         menu = QMenu(self)
         act_oeffnen     = menu.addAction("📂  Dokument öffnen")
         act_bearbeiten  = menu.addAction("✏  Bearbeiten")
-        act_mail        = menu.addAction("📧  Per E-Mail senden")
         menu.addSeparator()
         act_loeschen    = menu.addAction("🗑  Löschen")
 
@@ -3597,8 +3782,6 @@ class MitarbeiterDokumenteWidget(QWidget):
             self._verspaetung_oeffnen()
         elif action == act_bearbeiten:
             self._verspaetung_bearbeiten()
-        elif action == act_mail:
-            self._verspaetung_mail_senden()
         elif action == act_loeschen:
             self._verspaetung_loeschen()
 

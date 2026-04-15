@@ -355,11 +355,8 @@ class NeuerMitarbeiterDialog(QDialog):
 
         self._nachname     = QLineEdit(); self._nachname.setPlaceholderText("Nachname *")
         self._vorname      = QLineEdit(); self._vorname.setPlaceholderText("Vorname *")
-        self._geburtsdatum = QDateEdit(QDate(1990, 1, 1))
-        self._geburtsdatum.setCalendarPopup(True)
-        self._geburtsdatum.setDisplayFormat("dd.MM.yyyy")
         self._anstellung   = QComboBox()
-        self._anstellung.addItems(["NA", "Hauptamt", "FSJ", "Praktikant", "Sonstiges"])
+        self._anstellung.addItems(["NA", "Hauptamt", "Nebenamt", "FSJ", "Praktikant", "Sonstiges"])
         self._qualifikation = QComboBox()
         self._qualifikation.setEditable(True)
         self._qualifikation.addItems(["PRM", "RS", "NotSan", "FSJ", "SB", "Sonstiges"])
@@ -369,7 +366,6 @@ class NeuerMitarbeiterDialog(QDialog):
 
         f1.addRow("Nachname *:", self._nachname)
         f1.addRow("Vorname *:", self._vorname)
-        f1.addRow("Geburtsdatum:", self._geburtsdatum)
         f1.addRow("Anstellung:", self._anstellung)
         f1.addRow("Qualifikation:", self._qualifikation)
         f1.addRow("Bemerkung:", self._bemerkung_ma)
@@ -396,6 +392,8 @@ class NeuerMitarbeiterDialog(QDialog):
         self._aerztl_bis     = _date_edit(); f2.addRow("Ärztl. Untersuchung gültig bis:", self._aerztl_bis)
         self._fuehr_kont     = _date_edit(); f2.addRow("Führerschein Kontrolle:", self._fuehr_kont)
         self._arbeitsschutz  = _date_edit(); f2.addRow("Arbeitsschutz:", self._arbeitsschutz)
+        self._sicherheit_von = _date_edit(); f2.addRow("Sicherheitsschulung (Von):", self._sicherheit_von)
+        self._vorfeld_bis    = _date_edit(); f2.addRow("Vorfeldschulung (Gültig bis):", self._vorfeld_bis)
         tabs.addTab(t2, "🎓 Schulungen")
 
         # ── Tab 3: Weitere Infos (für andere DBs) ─────────────────────────
@@ -409,8 +407,11 @@ class NeuerMitarbeiterDialog(QDialog):
         self._funktion.addItems(["Schichtleiter", "Dispo", "Betreuer"])
         self._position    = QComboBox()
         self._position.setEditable(True)
-        pos = lade_positionen_ma_db()
-        self._position.addItems(pos if pos else ["PRM", "Schichtleiter"])
+        _entfernte_pos = {"Arzt", "Führungskraft", "Verwaltung", "Sanitätshelfer"}
+        pos = [p for p in lade_positionen_ma_db() if p not in _entfernte_pos]
+        if "Betreuer" not in pos:
+            pos = sorted(pos + ["Betreuer"])
+        self._position.addItems(pos if pos else ["Betreuer", "PRM", "Schichtleiter"])
         self._abteilung   = QComboBox()
         self._abteilung.setEditable(True)
         abt = lade_abteilungen_ma_db()
@@ -484,14 +485,13 @@ class NeuerMitarbeiterDialog(QDialog):
         return _date(d.year(), d.month(), d.day())
 
     def get_stamm_daten(self) -> dict:
-        geb = self._geburtsdatum.date()
         return {
-            "nachname":     self._nachname.text().strip(),
-            "vorname":      self._vorname.text().strip(),
-            "geburtsdatum": geb.toString("dd.MM.yyyy"),
-            "anstellung":   self._anstellung.currentText(),
-            "qualifikation":self._qualifikation.currentText(),
-            "bemerkung":    self._bemerkung_ma.toPlainText().strip(),
+            "nachname":      self._nachname.text().strip(),
+            "vorname":       self._vorname.text().strip(),
+            "geburtsdatum":  "",
+            "anstellung":    self._anstellung.currentText(),
+            "qualifikation": self._qualifikation.currentText(),
+            "bemerkung":     self._bemerkung_ma.toPlainText().strip(),
         }
 
     def get_schulungs_daten(self) -> dict:
@@ -524,6 +524,8 @@ class NeuerMitarbeiterDialog(QDialog):
         _add("Aerztl_Untersuchung", None, self._aerztl_bis)
         _add("Fuehrerschein_Kont",  self._fuehr_kont)
         _add("Arbeitsschutz",       self._arbeitsschutz)
+        _add("Sicherheitsschulung", self._sicherheit_von)
+        _add("Vorfeldschulung",     None, self._vorfeld_bis)
         return eintraege
 
     def get_ma_db_daten(self) -> dict:
@@ -566,6 +568,8 @@ def _lade_typen():
             "Einw_QM":             "QM",
             "Fragebogen_Schulung": "Frageb.",
             "Personalausweis":     "PA/Pass",
+            "Sicherheitsschulung": "Sich.Sch.",
+            "Vorfeldschulung":      "Vorfeld",
             "Sonstiges":           "Sonst.",
         }
     except Exception:
@@ -1066,6 +1070,32 @@ class _SchulungBearbeitenDialog(QDialog):
             self._bemerkung.setText(eintrag.get("bemerkung", "") or "")
         form.addRow("Bemerkung:", self._bemerkung)
 
+        # Informiert-Zeile
+        w_info = QWidget()
+        h_info = QHBoxLayout(w_info)
+        h_info.setContentsMargins(0, 0, 0, 0)
+        h_info.setSpacing(6)
+        self._chk_informiert = QCheckBox("informiert am")
+        h_info.addWidget(self._chk_informiert)
+        self._datum_informiert = _date_edit(eintrag.get("informiert_am", "") if eintrag else "")
+        self._datum_informiert.setEnabled(False)
+        h_info.addWidget(self._datum_informiert)
+        btn_info_clr = QPushButton("🗑")
+        btn_info_clr.setFixedSize(26, 24)
+        btn_info_clr.setToolTip("Informiert-Eintrag löschen")
+        btn_info_clr.setStyleSheet(
+            "QPushButton{background:#ffebee;border:none;border-radius:3px;font-size:13px;}"
+            "QPushButton:hover{background:#ef9a9a;}"
+        )
+        btn_info_clr.clicked.connect(self._info_loeschen)
+        h_info.addWidget(btn_info_clr)
+        h_info.addStretch()
+        if eintrag and eintrag.get("informiert"):
+            self._chk_informiert.setChecked(True)
+            self._datum_informiert.setEnabled(True)
+        self._chk_informiert.toggled.connect(self._datum_informiert.setEnabled)
+        form.addRow("Mitarbeiter:", w_info)
+
         v.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -1078,6 +1108,10 @@ class _SchulungBearbeitenDialog(QDialog):
         btn_row.addWidget(btn_speichern)
         btn_row.addWidget(btn_abbrechen)
         v.addLayout(btn_row)
+
+    def _info_loeschen(self):
+        self._chk_informiert.setChecked(False)
+        self._datum_informiert.setDate(QDate(2000, 1, 1))
 
     def _auto_gueltig_bis(self, d: QDate):
         if d == QDate(2000, 1, 1):
@@ -1140,6 +1174,8 @@ class _SchulungBearbeitenDialog(QDialog):
             "laeuft_nicht_ab": int(cfg.get("laeuft_nicht_ab", False)),
             "status":          status,
             "bemerkung":       self._bemerkung.text().strip(),
+            "informiert":      int(self._chk_informiert.isChecked()),
+            "informiert_am":   self._datum_str(self._datum_informiert.date()) if self._chk_informiert.isChecked() else "",
         }
         if self._eintrag and self._eintrag.get("id"):
             aktualisiere_schulungseintrag(self._eintrag["id"], daten)
@@ -1194,9 +1230,9 @@ class _MitarbeiterDetailDialog(QDialog):
             v.addWidget(warn)
 
         self._tbl = QTableWidget()
-        self._tbl.setColumnCount(5)
+        self._tbl.setColumnCount(6)
         self._tbl.setHorizontalHeaderLabels(
-            ["Schulungstyp", "Absolviert am", "Gültig bis", "Status", ""]
+            ["Schulungstyp", "Absolviert am", "Gültig bis", "Status", "Informiert", ""]
         )
         self._tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1209,6 +1245,7 @@ class _MitarbeiterDetailDialog(QDialog):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self._tbl.doubleClicked.connect(lambda idx: self._bearbeiten(idx.row()))
         v.addWidget(self._tbl, 1)
 
@@ -1332,17 +1369,26 @@ class _MitarbeiterDetailDialog(QDialog):
                 dat   = eintrag.get("datum_absolviert", "") or "—"
                 gb    = eintrag.get("gueltig_bis", "") or "—"
                 st    = eintrag.get("status", "") or "—"
+                # Informiert-Anzeige
+                if eintrag.get("informiert"):
+                    inf_am = eintrag.get("informiert_am", "") or ""
+                    inf_txt = f"✓ {inf_am}" if inf_am else "✓"
+                else:
+                    inf_txt = ""
                 items = [
                     QTableWidgetItem(anzeige),
                     QTableWidgetItem(dat),
                     QTableWidgetItem(gb),
                     QTableWidgetItem(st),
+                    QTableWidgetItem(inf_txt),
                 ]
                 if bg != "#ffffff":
-                    for it in items:
+                    for it in items[:4]:
                         it.setBackground(QColor(bg))
+                if eintrag.get("informiert"):
+                    items[4].setForeground(QColor("#2e7d32"))
             else:
-                items = [QTableWidgetItem(anzeige)] + [QTableWidgetItem("") for _ in range(3)]
+                items = [QTableWidgetItem(anzeige)] + [QTableWidgetItem("") for _ in range(4)]
                 for it in items:
                     it.setForeground(QColor("#bdbdbd"))
                 items[0].setForeground(QColor("#9e9e9e"))
@@ -1352,7 +1398,7 @@ class _MitarbeiterDetailDialog(QDialog):
             for col, it in enumerate(items):
                 self._tbl.setItem(row, col, it)
 
-            # ✏️-Bearbeiten-Button in letzter Spalte
+            # ✏️-Bearbeiten-Button in letzter Spalte (col 5)
             btn_edit = QPushButton("✏️")
             btn_edit.setFixedSize(28, 24)
             btn_edit.setToolTip("Eintrag bearbeiten")
@@ -1361,7 +1407,7 @@ class _MitarbeiterDetailDialog(QDialog):
                 "QPushButton:hover{background:#90caf9;}"
             )
             btn_edit.clicked.connect(lambda _=False, r=row: self._bearbeiten(r))
-            self._tbl.setCellWidget(row, 4, btn_edit)
+            self._tbl.setCellWidget(row, 5, btn_edit)
         self._tbl.blockSignals(False)
 
     def _bearbeiten(self, row: int):
@@ -1387,7 +1433,7 @@ class _MitarbeiterListeWidget(QWidget):
         ("Refresher",          "Ref."),
         ("ZÜP",                "ZÜP"),
         ("Aerztl_Untersuchung","Ärztl."),
-        ("Fuehrerschein_Kont", "FS-K."),
+        ("Sicherheitsschulung","Sich.Sch."),
     ]
 
     _FARB_MAP = {
