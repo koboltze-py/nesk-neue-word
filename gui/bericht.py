@@ -386,6 +386,16 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
     # Erstes leeres Blatt entfernen
     ws_dummy = wb.active
 
+    # ── Datum-Parser: DD.MM.YYYY → datetime.date (echte Excel-Datumswerte) ──
+    import re as _re_b; from datetime import date as _excel_d_b
+    def _d(s):
+        if not s: return s
+        m = _re_b.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", str(s).strip())
+        if m:
+            try: return _excel_d_b(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError: pass
+        return s
+
     def _hdr_fill(hex_color: str):
         return PatternFill("solid", fgColor=hex_color.lstrip("#"))
 
@@ -432,6 +442,8 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
             fill = f1 if r_offset % 2 == 0 else f2
             for col_idx, wert in enumerate(zeile, 1):
                 c = ws.cell(row=row_num, column=col_idx, value=wert)
+                if isinstance(wert, _excel_d_b):
+                    c.number_format = "DD.MM.YYYY"
                 c.fill = fill
                 c.border = thin
                 c.alignment = center if col_idx <= 3 else left
@@ -459,7 +471,7 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
                 vmin = e.get("verspaetung_min") or 0
                 versp = f"{vmin} Min. zu spät" if vmin > 0 else (f"{abs(vmin)} Min. früh" if vmin < 0 else "Pünktlich")
                 zeilen.append([
-                    e.get("datum", ""), e.get("mitarbeiter", ""), e.get("dienst", ""),
+                    _d(e.get("datum", "")), e.get("mitarbeiter", ""), e.get("dienst", ""),
                     e.get("dienstbeginn", ""), e.get("dienstantritt", ""), versp,
                     e.get("aufgenommen_von", ""), e.get("begruendung", ""),
                 ])
@@ -570,7 +582,7 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
             zeilen = []
             for idx, e in enumerate(eintr, 1):
                 zeilen.append([
-                    idx, e.get("datum", ""), e.get("uhrzeit", ""),
+                    idx, _d(e.get("datum", "")), e.get("uhrzeit", ""),
                     e.get("einsatzdauer", "") or "",
                     e.get("einsatzstichwort", ""), e.get("einsatzort", ""),
                     e.get("einsatznr_drk", ""), e.get("drk_ma1", ""), e.get("drk_ma2", ""),
@@ -591,7 +603,7 @@ def _erstelle_bericht_excel(abschnitte: list[dict], ziel_pfad: str) -> None:
             zeilen = []
             for idx, e in enumerate(eintr, 1):
                 zeilen.append([
-                    idx, e.get("datum", ""), e.get("uhrzeit", ""),
+                    idx, _d(e.get("datum", "")), e.get("uhrzeit", ""),
                     e.get("behandlungsdauer", "") or "",
                     e.get("patient_typ", "") or "",
                     e.get("alter", "") or "",

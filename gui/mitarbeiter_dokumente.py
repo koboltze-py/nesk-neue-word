@@ -1257,6 +1257,16 @@ def _verspaetungen_als_excel_speichern(eintraege: list[dict], pfad: str) -> None
 
     ws.row_dimensions[1].height = 22
 
+    # ── Datum-Parser für echte Excel-Datumswerte (sortierbar) ──────────────────
+    import re as _re_versp; from datetime import date as _excel_d
+    def _d(s):
+        if not s: return s
+        mv = _re_versp.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", str(s).strip())
+        if mv:
+            try: return _excel_d(int(mv.group(3)), int(mv.group(2)), int(mv.group(1)))
+            except ValueError: pass
+        return s
+
     # ── Datenzeilen ──────────────────────────────────────────────────────────
     fill_gelb  = PatternFill("solid", fgColor="FFF3CD")
     fill_gruen = PatternFill("solid", fgColor="D4EDDA")
@@ -1276,7 +1286,7 @@ def _verspaetungen_als_excel_speichern(eintraege: list[dict], pfad: str) -> None
             row_fill   = fill_gruen
 
         zeile = [
-            e.get("datum", ""),
+            _d(e.get("datum", "")),
             e.get("mitarbeiter", ""),
             e.get("dienst", ""),
             e.get("dienstbeginn", ""),
@@ -1289,6 +1299,8 @@ def _verspaetungen_als_excel_speichern(eintraege: list[dict], pfad: str) -> None
         alt_fill = fill_alt if row_idx % 2 == 0 else fill_white
         for col_idx, wert in enumerate(zeile, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=wert)
+            if col_idx == 1 and isinstance(wert, _excel_d):
+                cell.number_format = "DD.MM.YYYY"
             cell.border    = thin_border
             cell.alignment = center_align if col_idx in (1, 3, 4, 5, 6, 9) else left_align
             # Verspätungsspalte bekommt eigene Farbe, Rest Zebrastreifen
