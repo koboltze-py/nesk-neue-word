@@ -784,6 +784,16 @@ def export_einsaetze_excel(
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.row_dimensions[3].height = 32
 
+    # ── Datum-Parser für echte Excel-Datumswerte (sortierbar) ──────────────────
+    import re as _re_ein; from datetime import date as _excel_d_ein
+    def _d_ein(s):
+        if not s: return s
+        m = _re_ein.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", str(s).strip())
+        if m:
+            try: return _excel_d_ein(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError: pass
+        return s
+
     # ── Datenzeilen ────────────────────────────────────────────────────────
     ang_count = 0
     for row_idx, e in enumerate(eintraege, start=1):
@@ -804,7 +814,7 @@ def export_einsaetze_excel(
 
         values = [
             row_idx,
-            e.get("datum", ""),
+            _d_ein(e.get("datum", "")),
             e.get("uhrzeit", ""),
             dauer if dauer else "",
             e.get("einsatzstichwort", ""),
@@ -817,6 +827,8 @@ def export_einsaetze_excel(
         ]
         for col, val in enumerate(values, start=1):
             cell = ws.cell(row=row_num, column=col, value=val)
+            if col == 2 and isinstance(val, _excel_d_ein):
+                cell.number_format = "DD.MM.YYYY"
             cell.fill   = row_fill
             cell.border = border
             cell.alignment = Alignment(vertical="center", wrap_text=(col in (5, 11)))
@@ -927,6 +939,16 @@ def export_patienten_excel(
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.row_dimensions[3].height = 32
 
+    # ── Datum-Parser für echte Excel-Datumswerte (sortierbar) ──────────────────
+    import re as _re_pat; from datetime import date as _excel_d_pat
+    def _d_pat(s):
+        if not s: return s
+        m = _re_pat.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", str(s).strip())
+        if m:
+            try: return _excel_d_pat(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError: pass
+        return s
+
     # ── Datenzeilen ────────────────────────────────────────────────────────
     fill_alt   = PatternFill("solid", fgColor="F5F5F5")
     fill_white = PatternFill("solid", fgColor="FFFFFF")
@@ -946,7 +968,7 @@ def export_patienten_excel(
 
         values = [
             row_idx,
-            p.get("datum", ""),
+            _d_pat(p.get("datum", "")),
             p.get("uhrzeit", ""),
             dauer if dauer else "—",
             p.get("patient_typ", "") or "—",
@@ -963,6 +985,8 @@ def export_patienten_excel(
         wrap_cols   = {8, 10}
         for col, val in enumerate(values, start=1):
             cell = ws.cell(row=row_num, column=col, value=val)
+            if col == 2 and isinstance(val, _excel_d_pat):
+                cell.number_format = "DD.MM.YYYY"
             cell.fill   = row_fill
             cell.border = border
             if col in center_cols:
