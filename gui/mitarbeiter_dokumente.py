@@ -1261,9 +1261,9 @@ def _verspaetungen_als_excel_speichern(eintraege: list[dict], pfad: str) -> None
     import re as _re_versp; from datetime import date as _excel_d
     def _d(s):
         if not s: return s
-        mv = _re_versp.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(s).strip())
+        mv = _re_versp.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", str(s).strip())
         if mv:
-            try: return _excel_d(int(mv.group(1)), int(mv.group(2)), int(mv.group(3)))
+            try: return _excel_d(int(mv.group(3)), int(mv.group(2)), int(mv.group(1)))
             except ValueError: pass
         return s
 
