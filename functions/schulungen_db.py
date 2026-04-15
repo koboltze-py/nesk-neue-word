@@ -38,8 +38,10 @@ SCHULUNGSTYPEN_CFG = {
     "Arbeitsschutz":          {"anzeige": "Arbeitsschutz",         "ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
     "Einw_QM":                {"anzeige": "Einweisung QM",         "ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
     "Fragebogen_Schulung":    {"anzeige": "Fragebogen Schulung",  "ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
-    "Personalausweis":        {"anzeige": "Personalausweis/Pass", "ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
-    "Sonstiges":              {"anzeige": "Sonstiges",             "ablauf": "direkt",    "intervall": None, "laeuft_nicht_ab": False},
+    "Personalausweis":        {"anzeige": "Personalausweis/Pass",  "ablauf": "einmalig",  "intervall": None, "laeuft_nicht_ab": True},
+    "Sicherheitsschulung":    {"anzeige": "Sicherheitsschulung",   "ablauf": "intervall", "intervall": 5,    "laeuft_nicht_ab": False},
+    "Vorfeldschulung":         {"anzeige": "Vorfeldschulung",        "ablauf": "direkt",    "intervall": None, "laeuft_nicht_ab": False},
+    "Sonstiges":              {"anzeige": "Sonstiges",              "ablauf": "direkt",    "intervall": None, "laeuft_nicht_ab": False},
 }
 
 # Listen für UI-Dropdowns (Backward-Compat.)
@@ -116,6 +118,15 @@ def _init_db():
                     SELECT id, erstellt_am, mitarbeiter, schulungsart, datum, gueltig_bis, status, bemerkung, aufgenommen_von
                     FROM schulungen
                 """)
+        # Spalten-Migration: informiert / informiert_am
+        for _col_def in [
+            "ALTER TABLE schulungseintraege ADD COLUMN informiert INTEGER DEFAULT 0",
+            "ALTER TABLE schulungseintraege ADD COLUMN informiert_am TEXT",
+        ]:
+            try:
+                conn.execute(_col_def)
+            except Exception:
+                pass
         conn.commit()
 
 
@@ -266,8 +277,9 @@ def speichere_schulungseintrag(daten: dict) -> int:
         cur = conn.execute(
             """INSERT INTO schulungseintraege
                (mitarbeiter_id, schulungstyp, datum_absolviert, gueltig_bis,
-                laeuft_nicht_ab, status, bemerkung, zuletzt_akt)
-               VALUES (?,?,?,?,?,?,?,?)""",
+                laeuft_nicht_ab, status, bemerkung, zuletzt_akt,
+                informiert, informiert_am)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (daten.get("mitarbeiter_id"),
              key,
              daten.get("datum_absolviert", ""),
@@ -275,7 +287,9 @@ def speichere_schulungseintrag(daten: dict) -> int:
              int(cfg.get("laeuft_nicht_ab", False)),
              daten.get("status", "gültig"),
              daten.get("bemerkung", ""),
-             now),
+             now,
+             int(daten.get("informiert", 0)),
+             daten.get("informiert_am") or None),
         )
         conn.commit()
         return cur.lastrowid
@@ -288,7 +302,8 @@ def aktualisiere_schulungseintrag(eintrag_id: int, daten: dict) -> None:
         conn.execute(
             """UPDATE schulungseintraege SET
                schulungstyp=?, datum_absolviert=?, gueltig_bis=?,
-               laeuft_nicht_ab=?, status=?, bemerkung=?, zuletzt_akt=?
+               laeuft_nicht_ab=?, status=?, bemerkung=?, zuletzt_akt=?,
+               informiert=?, informiert_am=?
                WHERE id=?""",
             (daten.get("schulungstyp", ""),
              daten.get("datum_absolviert", ""),
@@ -297,6 +312,8 @@ def aktualisiere_schulungseintrag(eintrag_id: int, daten: dict) -> None:
              daten.get("status", "gültig"),
              daten.get("bemerkung", ""),
              now,
+             int(daten.get("informiert", 0)),
+             daten.get("informiert_am") or None,
              eintrag_id),
         )
         conn.commit()

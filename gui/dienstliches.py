@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dienstliches Widget
 Dienstliche Protokolle: Einsätze nach Einsatzstatistik-Vorlage FKB
 """
@@ -2572,6 +2572,7 @@ class _PatientenTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._eintraege: list[dict] = []
+        self._erster_laden = True
         self._build_ui()
         self.refresh()
 
@@ -2735,16 +2736,27 @@ class _PatientenTab(QWidget):
         layout.addWidget(self._stat_lbl)
 
     def refresh(self):
+        from datetime import date as _date
         current_j = self._combo_jahr.currentData()
         self._combo_jahr.blockSignals(True)
         self._combo_jahr.clear()
         self._combo_jahr.addItem("Alle", None)
         for j in verfuegbare_jahre_patienten():
             self._combo_jahr.addItem(str(j), j)
-        for i in range(self._combo_jahr.count()):
-            if self._combo_jahr.itemData(i) == current_j:
-                self._combo_jahr.setCurrentIndex(i)
-                break
+        if self._erster_laden:
+            aktuelles_jahr = _date.today().year
+            aktueller_monat = _date.today().month
+            for i in range(self._combo_jahr.count()):
+                if self._combo_jahr.itemData(i) == aktuelles_jahr:
+                    self._combo_jahr.setCurrentIndex(i)
+                    break
+            self._combo_monat.setCurrentIndex(aktueller_monat)
+            self._erster_laden = False
+        else:
+            for i in range(self._combo_jahr.count()):
+                if self._combo_jahr.itemData(i) == current_j:
+                    self._combo_jahr.setCurrentIndex(i)
+                    break
         self._combo_jahr.blockSignals(False)
         self._lade()
 
@@ -3107,6 +3119,7 @@ class _EinsaetzeTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._eintraege: list[dict] = []
+        self._erster_laden = True
         self._build_ui()
         self.refresh()
 
@@ -3274,18 +3287,27 @@ class _EinsaetzeTab(QWidget):
     # ── Refresh / Laden ───────────────────────────────────────────────────────
 
     def refresh(self):
-        # Jahre aktualisieren
+        from datetime import date as _date
         current_j = self._combo_jahr.currentData()
         self._combo_jahr.blockSignals(True)
         self._combo_jahr.clear()
         self._combo_jahr.addItem("Alle", None)
         for j in verfuegbare_jahre_einsaetze():
             self._combo_jahr.addItem(str(j), j)
-        # Aktuelles Jahr wiederherstellen
-        for i in range(self._combo_jahr.count()):
-            if self._combo_jahr.itemData(i) == current_j:
-                self._combo_jahr.setCurrentIndex(i)
-                break
+        if self._erster_laden:
+            aktuelles_jahr = _date.today().year
+            aktueller_monat = _date.today().month
+            for i in range(self._combo_jahr.count()):
+                if self._combo_jahr.itemData(i) == aktuelles_jahr:
+                    self._combo_jahr.setCurrentIndex(i)
+                    break
+            self._combo_monat.setCurrentIndex(aktueller_monat)
+            self._erster_laden = False
+        else:
+            for i in range(self._combo_jahr.count()):
+                if self._combo_jahr.itemData(i) == current_j:
+                    self._combo_jahr.setCurrentIndex(i)
+                    break
         self._combo_jahr.blockSignals(False)
         self._lade()
 
