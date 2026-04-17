@@ -1073,7 +1073,14 @@ def prm_schulung_importieren(pfad: str | None = None) -> dict:
             name_raw = str(name_raw).strip()
 
             datum_absolviert_d = _parse_datum(row[5])   # Nachgewiesen am
-            gueltig_bis_d      = _parse_datum(row[6])   # Gültig bis
+            gueltig_bis_d      = _parse_datum(row[6])   # Gültig bis (aus Excel)
+
+            # Gültig bis fehlt → 5 Jahre ab Nachgewiesen am berechnen
+            if gueltig_bis_d is None and datum_absolviert_d is not None:
+                try:
+                    gueltig_bis_d = datum_absolviert_d.replace(year=datum_absolviert_d.year + 5)
+                except ValueError:
+                    gueltig_bis_d = date(datum_absolviert_d.year + 5, datum_absolviert_d.month, 28)
 
             dat_str = _datum_str(datum_absolviert_d)
             gb_str  = _datum_str(gueltig_bis_d)
