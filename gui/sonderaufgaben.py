@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
     QFrame, QScrollArea, QSizePolicy, QMessageBox, QFileDialog,
     QGroupBox, QTreeView, QSplitter, QFileSystemModel, QMenu,
-    QInputDialog,
+    QInputDialog, QDialog, QDialogButtonBox, QSpinBox, QCheckBox,
 )
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QFont
@@ -31,6 +31,7 @@ from functions.settings_functions import get_setting
 
 # ── Pfad zur Excel-Vorlage ─────────────────────────────────────────────────
 TEMPLATE_PATH = Path(BASE_DIR) / "Daten" / "Sonderaufgaben" / "Sonderaufgaben.xlsx"
+VORFELD_DIR   = Path(BASE_DIR) / "Daten" / "vorfeldmit"
 
 # Aufgaben-Zeilen im Excel-Template (Zeile → Aufgabenname)
 # Tagdienst → Spalte C (3), Nachtdienst → Spalte E (5)
@@ -132,14 +133,19 @@ class SonderaufgabenWidget(QWidget):
 
         # Status-Variablen
         self._entries: dict = {}          # key → {'combo': QComboBox, 'line': QLineEdit, 'nur_bulmor': bool}
+        self._vorfeld_entries: dict = {}  # key → {'combo': QComboBox, 'line': QLineEdit}
         self._tag_mitarbeiter:   list[str] = []
         self._nacht_mitarbeiter: list[str] = []
         self._tag_bulmor:        list[str] = []
         self._nacht_bulmor:      list[str] = []
         self._tag_emobby:        list[str] = []
         self._nacht_emobby:      list[str] = []
+        self._alle_mitarbeiter:  list[str] = []  # kombiniert Tag + Nacht
         self._tag_kat:           dict[str, str] = {}   # name → "T" oder "T10"
         self._nacht_kat:         dict[str, str] = {}   # name → "N" oder "N10"
+        self._alle_kat:          dict[str, str] = {}   # name → Kategorie
+        self._alle_bulmor:       set[str] = set()
+        self._alle_emobby:       set[str] = set()
         self._dienstplan_geladen: bool = False
         self._dienstplan_pfad:   str  = ""
         self._fs_model: QFileSystemModel | None = None
@@ -426,6 +432,11 @@ class SonderaufgabenWidget(QWidget):
             self._entries[key] = {"combo": combo, "line": line, "nur_bulmor": False}
 
         self._content_layout.addWidget(sec4)
+
+        # ── Sektion 5: Vorfeldmitarbeiter ─────────────────────────────────────
+        sec5 = self._build_vorfeld_section()
+        self._content_layout.addWidget(sec5)
+
         self._content_layout.addStretch()
 
     # ── Formular-Hilfsmethoden ───────────────────────────────────────────────
@@ -768,6 +779,23 @@ class SonderaufgabenWidget(QWidget):
             self._nacht_emobby      = nacht_emobby
             self._tag_kat           = tag_kat
             self._nacht_kat         = nacht_kat
+
+            # Alle Mitarbeiter (kombiniert Tag + Nacht) für Vorfeldmitarbeiter-Dropdowns
+            alle_mitarbeiter: list[str] = []
+            alle_kat: dict[str, str] = {}
+            for n in tag_mitarbeiter:
+                if n not in alle_mitarbeiter:
+                    alle_mitarbeiter.append(n)
+                    alle_kat[n] = tag_kat.get(n, "T")
+            for n in nacht_mitarbeiter:
+                if n not in alle_mitarbeiter:
+                    alle_mitarbeiter.append(n)
+                    alle_kat[n] = nacht_kat.get(n, "N")
+            self._alle_mitarbeiter = alle_mitarbeiter
+            self._alle_kat         = alle_kat
+            self._alle_bulmor      = set(tag_bulmor) | set(nacht_bulmor)
+            self._alle_emobby      = set(tag_emobby) | set(nacht_emobby)
+
             self._dienstplan_geladen = True
             self._btn_open_dienstplan.setEnabled(True)
 
@@ -906,43 +934,338 @@ class SonderaufgabenWidget(QWidget):
                 f"Vorlage nicht gefunden:\n{TEMPLATE_PATH}"
             )
 
+    # ── Vorfeldmitarbeiter-Sektion ───────────────────────────────────────────
+
+    def _build_vorfeld_section(self) -> QGroupBox:
+        """Sektion Vorfeldmitarbeiter: 3 Gruppen × 3 Mitarbeiter-Slots."""
+        self._vorfeld_entries.clear()
+        sec = self._make_section("👷 Vorfeldmitarbeiter")
+        layout = sec.layout()
+
+        groups = [
+            ("Gruppe 1", "09:00 – 14:00 Uhr", "gr1"),
+            ("Gruppe 2", "14:00 – 19:00 Uhr", "gr2"),
+            ("Gruppe 3", "19:00 – 00:00 Uhr", "gr3"),
+        ]
+        group_colors = ["#1B5E20", "#E65100", "#4527A0"]  # Dunkelgrün, Orange, Lila
+
+        display_items = self._vorfeld_display_items()
+
+        for g_idx, (group_name, time_range, group_key) in enumerate(groups):
+            grp_box = QGroupBox(f"{group_name}  |  {time_range}")
+            grp_box.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+            grp_col = group_colors[g_idx]
+            grp_box.setStyleSheet(f"""
+                QGroupBox {{
+                    background: #f8f9ff;
+                    border: 2px solid {grp_col};
+                    border-radius: 5px;
+                    margin-top: 8px;
+                    padding: 8px;
+                    color: {grp_col};
+                }}
+                QGroupBox::title {{
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }}
+            """)
+            grp_layout = QGridLayout(grp_box)
+            grp_layout.setContentsMargins(8, 18, 8, 8)
+            grp_layout.setHorizontalSpacing(10)
+            grp_layout.setVerticalSpacing(6)
+            grp_layout.setColumnStretch(1, 3)
+            grp_layout.setColumnStretch(2, 2)
+
+            for slot in range(1, 4):
+                key = f"vorfeld_{group_key}_{slot}"
+
+                slot_lbl = QLabel(f"MA {slot}:")
+                slot_lbl.setFont(QFont("Arial", 11))
+                slot_lbl.setFixedWidth(44)
+                slot_lbl.setStyleSheet(f"color: {FIORI_TEXT};")
+                grp_layout.addWidget(slot_lbl, slot - 1, 0)
+
+                combo = QComboBox()
+                combo.setFixedHeight(30)
+                combo.setStyleSheet(_combo_style())
+                combo.addItems(display_items)
+                combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                grp_layout.addWidget(combo, slot - 1, 1)
+
+                line = QLineEdit()
+                line.setFixedHeight(30)
+                line.setStyleSheet(_line_style())
+                line.setPlaceholderText("Name")
+                line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                grp_layout.addWidget(line, slot - 1, 2)
+
+                combo.currentTextChanged.connect(
+                    lambda txt, k=key: self._vorfeld_combo_to_line(k, txt)
+                )
+                self._vorfeld_entries[key] = {"combo": combo, "line": line}
+
+            layout.addWidget(grp_box)
+
+        return sec
+
+    def _vorfeld_display_items(self) -> list[str]:
+        """Dropdown-Einträge für Vorfeldmitarbeiter (alle MA + Typmarkierung)."""
+        if not self._alle_mitarbeiter:
+            return ["— Dienstplan laden —"]
+        items = ["— bitte wählen —"]
+        for name in self._alle_mitarbeiter:
+            kat = self._alle_kat.get(name, "")
+            parts = [kat] if kat else []
+            if name in self._alle_bulmor:
+                parts.append("Bulmor")
+            if name in self._alle_emobby:
+                parts.append("E-Mobby")
+            suffix = f" [{', '.join(parts)}]" if parts else ""
+            items.append(f"{name}{suffix}")
+        return items
+
+    def _vorfeld_combo_to_line(self, key: str, choice: str):
+        """Dropdown-Auswahl in Vorfeld-Textfeld übertragen (Name ohne Typ-Suffix)."""
+        if not choice or choice in ("— bitte wählen —", "— Dienstplan laden —"):
+            return
+        entry = self._vorfeld_entries.get(key)
+        if not entry:
+            return
+        import re as _re
+        clean = _re.sub(r'\s+\[.*\]$', '', choice).strip()
+        entry["line"].setText(clean)
+
+    # ── Vorfeldmitarbeiterliste speichern ────────────────────────────────────
+
+    def _save_vorfeld(self, silent: bool = False) -> Path | None:
+        """Vorfeldmitarbeiterliste als Excel in VORFELD_DIR speichern."""
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        except ImportError:
+            if not silent:
+                QMessageBox.critical(self, "Fehler", "openpyxl nicht installiert!")
+            return None
+
+        try:
+            VORFELD_DIR.mkdir(parents=True, exist_ok=True)
+            datum_heute = datetime.now()
+            output_name = f"Vorfeldmitarbeiter_{datum_heute.strftime('%Y_%m_%d')}.xlsx"
+            output_path = VORFELD_DIR / output_name
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Vorfeldmitarbeiter"
+
+            # ── Styles ──────────────────────────────────────────────────────
+            title_font  = Font(name="Arial", bold=True, size=13, color="222222")
+            header_font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+            header_fill = PatternFill(start_color="1565A8", end_color="1565A8",
+                                      fill_type="solid")
+            data_font   = Font(name="Arial", size=11)
+            group_fonts = [
+                Font(name="Arial", bold=True, size=11, color="FFFFFF"),
+                Font(name="Arial", bold=True, size=11, color="FFFFFF"),
+                Font(name="Arial", bold=True, size=11, color="FFFFFF"),
+            ]
+            group_fills = [
+                PatternFill(start_color="1B5E20", end_color="1B5E20", fill_type="solid"),
+                PatternFill(start_color="E65100", end_color="E65100", fill_type="solid"),
+                PatternFill(start_color="4527A0", end_color="4527A0", fill_type="solid"),
+            ]
+            thin_side   = Side(border_style="thin", color="C8D2DC")
+            thin_border = Border(left=thin_side, right=thin_side,
+                                 top=thin_side, bottom=thin_side)
+            center      = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            left        = Alignment(horizontal="left",   vertical="center")
+
+            ws.column_dimensions["A"].width = 24
+            ws.column_dimensions["B"].width = 26
+            ws.column_dimensions["C"].width = 26
+            ws.column_dimensions["D"].width = 26
+
+            # ── Titel-Zeile ─────────────────────────────────────────────────
+            ws.merge_cells("A1:D1")
+            c = ws["A1"]
+            c.value = (
+                f"DRK KV Köln e.V.  –  Vorfeldmitarbeiter  –  Sanitätsstation CGN"
+                f"        Datum: {datum_heute.strftime('%d.%m.%Y')}"
+            )
+            c.font = title_font
+            c.alignment = left
+            ws.row_dimensions[1].height = 26
+
+            # ── Header-Zeile ─────────────────────────────────────────────────
+            ws.row_dimensions[2].height = 20
+            for col, txt in enumerate(
+                ["Gruppe / Zeit", "Mitarbeiter 1", "Mitarbeiter 2", "Mitarbeiter 3"],
+                start=1,
+            ):
+                hdr = ws.cell(row=2, column=col, value=txt)
+                hdr.font      = header_font
+                hdr.fill      = header_fill
+                hdr.alignment = center
+                hdr.border    = thin_border
+
+            # ── Daten-Zeilen ─────────────────────────────────────────────────
+            groups = [
+                ("Gruppe 1\n09:00 – 14:00 Uhr", "gr1"),
+                ("Gruppe 2\n14:00 – 19:00 Uhr", "gr2"),
+                ("Gruppe 3\n19:00 – 00:00 Uhr", "gr3"),
+            ]
+            for g_idx, (group_label, group_key) in enumerate(groups):
+                row = 3 + g_idx
+                ws.row_dimensions[row].height = 36
+
+                lbl = ws.cell(row=row, column=1, value=group_label)
+                lbl.font      = group_fonts[g_idx]
+                lbl.fill      = group_fills[g_idx]
+                lbl.alignment = center
+                lbl.border    = thin_border
+
+                for slot in range(1, 4):
+                    key   = f"vorfeld_{group_key}_{slot}"
+                    entry = self._vorfeld_entries.get(key)
+                    val   = entry["line"].text().strip() if entry else ""
+                    dc    = ws.cell(row=row, column=1 + slot, value=val if val else None)
+                    dc.font      = data_font
+                    dc.alignment = center
+                    dc.border    = thin_border
+
+            wb.save(str(output_path))
+
+            if not silent:
+                antwort = QMessageBox.question(
+                    self, "Gespeichert",
+                    f"Vorfeldmitarbeiterliste gespeichert!\n\nDatei: {output_name}"
+                    "\n\nMöchten Sie die Datei öffnen?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if antwort == QMessageBox.StandardButton.Yes:
+                    import os as _os
+                    _os.startfile(str(output_path))
+
+            return output_path
+
+        except Exception as exc:
+            if not silent:
+                QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern:\n{exc}")
+            return None
+
     # ── Drucken ─────────────────────────────────────────────────────────────
 
     def _print(self):
-        """Zuerst speichern, dann drucken."""
-        saved = self._save(silent=True)
-        if not saved:
-            QMessageBox.warning(
-                self, "Fehler",
-                "Konnte nicht speichern – bitte erst manuell speichern."
+        """Druckdialog: Auswahl was und wie oft gedruckt werden soll."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("🖨️ Drucken")
+        dlg.setMinimumWidth(380)
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setSpacing(12)
+        dlg_layout.setContentsMargins(20, 20, 20, 16)
+
+        lbl_was = QLabel("<b>Was soll gedruckt werden?</b>")
+        lbl_was.setStyleSheet(f"color: {FIORI_TEXT}; font-size: 13px;")
+        dlg_layout.addWidget(lbl_was)
+
+        cb_sonder = QCheckBox("Sonderaufgaben")
+        cb_sonder.setChecked(True)
+        cb_sonder.setStyleSheet(f"color: {FIORI_TEXT}; font-size: 12px;")
+        dlg_layout.addWidget(cb_sonder)
+
+        cb_vorfeld = QCheckBox("Vorfeldmitarbeiterliste")
+        cb_vorfeld.setChecked(len(self._vorfeld_entries) > 0)
+        cb_vorfeld.setStyleSheet(f"color: {FIORI_TEXT}; font-size: 12px;")
+        dlg_layout.addWidget(cb_vorfeld)
+
+        dlg_layout.addSpacing(8)
+
+        anzahl_row = QHBoxLayout()
+        lbl_anzahl = QLabel("Anzahl Ausdrucke:")
+        lbl_anzahl.setStyleSheet(f"color: {FIORI_TEXT}; font-size: 12px;")
+        spin = QSpinBox()
+        spin.setMinimum(1)
+        spin.setMaximum(20)
+        spin.setValue(1)
+        spin.setFixedWidth(70)
+        spin.setStyleSheet(
+            "QSpinBox { border: 1px solid #c8d2dc; border-radius: 3px;"
+            " padding: 4px; font-size: 12px; }"
+        )
+        anzahl_row.addWidget(lbl_anzahl)
+        anzahl_row.addWidget(spin)
+        anzahl_row.addStretch()
+        dlg_layout.addLayout(anzahl_row)
+
+        dlg_layout.addSpacing(8)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Drucken")
+        btn_box.button(QDialogButtonBox.StandardButton.Cancel).setText("Abbrechen")
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        dlg_layout.addWidget(btn_box)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        drucke_sonder  = cb_sonder.isChecked()
+        drucke_vorfeld = cb_vorfeld.isChecked()
+        anzahl = spin.value()
+
+        if not drucke_sonder and not drucke_vorfeld:
+            QMessageBox.information(
+                self, "Nichts ausgewählt",
+                "Bitte mindestens eine Option auswählen."
             )
             return
 
-        anzahl, ok = QInputDialog.getInt(
-            self,
-            "Anzahl Ausdrucke",
-            f"Wie viele Ausdrucke sollen gedruckt werden?\n\n{saved.name}",
-            1, 1, 20, 1
-        )
-        if not ok:
+        # ── Dateien vorbereiten ───────────────────────────────────────────
+        dateien: list[Path] = []
+        if drucke_sonder:
+            saved = self._save(silent=True)
+            if not saved:
+                QMessageBox.warning(
+                    self, "Fehler",
+                    "Sonderaufgaben konnten nicht gespeichert werden."
+                )
+                return
+            dateien.append(saved)
+
+        if drucke_vorfeld:
+            saved_vf = self._save_vorfeld(silent=True)
+            if not saved_vf:
+                QMessageBox.warning(
+                    self, "Fehler",
+                    "Vorfeldmitarbeiterliste konnte nicht gespeichert werden."
+                )
+                return
+            dateien.append(saved_vf)
+
+        if not dateien:
             return
 
+        # ── Drucken ───────────────────────────────────────────────────────
         try:
-            import os as _os, shutil as _shutil, time as _time, tempfile as _tmp
-            from pathlib import Path as _Path
+            import os as _os
+            import shutil as _shutil
+            import time as _time
+            import tempfile as _tmp
+
             for i in range(anzahl):
-                # Jede Kopie als eigene Temp-Datei senden, damit Excel
-                # nicht die bereits laufende Verarbeitung erkennt und abbricht
-                tmp = _Path(_tmp.mktemp(suffix=".xlsx", dir=saved.parent))
-                _shutil.copy2(saved, tmp)
-                try:
-                    _os.startfile(str(tmp), "print")
-                except Exception:
-                    tmp.unlink(missing_ok=True)
-                    raise
-                # kurz warten, damit der Druckauftrag übergeben werden kann
-                if i < anzahl - 1:
-                    _time.sleep(3)
+                for datei in dateien:
+                    tmp = Path(_tmp.mktemp(suffix=".xlsx", dir=datei.parent))
+                    _shutil.copy2(datei, tmp)
+                    try:
+                        _os.startfile(str(tmp), "print")
+                    except Exception:
+                        tmp.unlink(missing_ok=True)
+                        raise
+                    if len(dateien) > 1 or i < anzahl - 1:
+                        _time.sleep(3)
         except Exception as exc:
             QMessageBox.critical(self, "Fehler", f"Drucken fehlgeschlagen:\n{exc}")
 
@@ -1117,8 +1440,12 @@ class SonderaufgabenWidget(QWidget):
         self._nacht_bulmor      = []
         self._tag_emobby        = []
         self._nacht_emobby      = []
+        self._alle_mitarbeiter  = []
         self._tag_kat           = {}
         self._nacht_kat         = {}
+        self._alle_kat          = {}
+        self._alle_bulmor       = set()
+        self._alle_emobby       = set()
         self._build_form()
 
     # ── Zufall-Verteilung Nacht ───────────────────────────────────────────────
