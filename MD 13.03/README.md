@@ -3,33 +3,13 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.10.0 (20.04.2026)  
-**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen** · **Sanitätsmaterial** · **Vorkommnisse**
-
-### Neu in v3.10.0
-- **Vorkommnisse** (neues Sidebar-Modul): Vollständige Vorfallbericht-Erfassung mit Formular, Person-Tabelle (5 Typen), optionalen Offblock-Feldern, Word-Export und Outlook-E-Mail-Entwurf
-- **Betroffene Personen – 5 Typen**: Passagier / PRM Passagier / Patient / Mitarbeiter / Sonstige; PRM-Kategorie-Dropdown (WCHS/WCHR/…) nur bei „PRM Passagier" aktiv
-- **Offblock optional**: Plan- und Ist-Offblock per Checkbox aktivierbar; Verspätungsberechnung nur wenn beide Felder gesetzt
-- **Outlook-Entwurf (Vorkommnisse)**: Dialog mit Betreff, Freitext-Body und Dateiauswahl aus den gespeicherten Berichten
-- **Dashboard – Notizen**: Kalender zeigt farbige Punkte für Termine (blau) und Notizen (grün); Doppelklick öffnet Notiz-Dialog
-
-### Neu in v3.9.0
-- **Schulungen – Informiert-Status**: Neue Spalten `informiert` + `informiert_am` in der DB; Checkbox + Datumsfeld im Bearbeiten-Dialog; Spalte „Informiert" in der Mitarbeiter-Detailansicht
-- **Vorfeldschulung** (neu): Direkter Ablauf, 12-Monats-Intervall, Warnungen 3/2/1 Monat vor Ablauf
-- **Sicherheitsschulung** (neu): Intervall-Ablauf, 5-Jahres-Zyklus
-- **Monatsfilter-Default**: Einsätze- und Patienten-Tab wählen beim ersten Öffnen automatisch aktuellen Monat/Jahr vor
-- **Excel-Datumssortierung**: Datum-Spalten in allen Excel-Exporten (Bericht, Einsätze, Patienten, Verspätungen) als echte Excel-Datumswerte → korrekte Sortierung nach vollem Datum statt nur nach Tag
-
-### Neu in v3.8.0
-- **Sanitätsmaterial Verbrauch – Excel-Export**: Export gibt jetzt `.xlsx` statt CSV aus; formatierte Darstellung nach Datum gruppiert, Datums-Trennzeilen, Gesamtübersicht aller verbrauchten Artikel alphabetisch mit Menge; Notiz-Spalte ergänzt
+**Version:** v3.7.0 (06.05.2026)  
+**Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen**
 
 ### Neu in v3.7.0
-- **Dashboard Word-Export überarbeitet**: Aptos-Schrift, alle Texte schwarz, kein blauer Hintergrund, SCHICHTLEITER-Block aus Sidebar entfernt
-- **Zeitraum fett**: Label in der Stärkemeldung fett, Wert nicht fett, tab-ausgerichtet
-- **Schichtleiter-Darstellung**: Uhrzeit als Tab-Label (fett), Name als Wert – kein „Tag:" / „Nacht:"-Präfix
-- **Sidebar +2pt**: Alle Sidebar-Schriften vergrößert, PAX/Einsätze-Werte 13pt
-
-### Neu in v3.6.0
+- **Sonderaufgaben – Vorfeldmitarbeiter**: Neuer Abschnitt mit 3 Gruppen × 3 Slots; Dropdowns aus Dienstplan mit Schichttyp (T/T10/N/N10), Bulmorfahrer (B) und E-Mobby-Fahrer (EM)
+- **Vorfeldmitarbeiterliste Excel**: Querformat A4, schwarz-weiß, Namen mit Abkürzungen, Speicherort `Daten/vorfeldmit/`
+- **Druckdialog**: Individuelle Anzahl pro Dokument (Standard: Sonderaufgaben 2×, Vorfeld 3×); Druck via PowerShell COM-Automation (Excel.Application)
 - **Schulungen – Mitarbeiter-Liste** (neuer Tab neben Kalender): Suche nach Name, Filter nach Status & Schulungstyp; Matrix EH/Refresher/ZÜP/Ärztl./FS-K. mit Farbkodierung; Mitarbeiter ohne Einträge gesondert grau
 - **Schulungen – Detailansicht**: Doppelklick auf MA → alle 14 Schulungstypen; fehlende Einträge leer/grau
 - **Schulungen – Datum bearbeiten**: ✏️-Button oder Doppelklick je Schulungstyp → Datumspicker, automatische Gültig-bis-Berechnung, direktes Speichern in DB

@@ -3,10 +3,13 @@
 **DRK Flughafen Köln – Erste-Hilfe-Station**  
 Dienstplan-Verwaltung, Stärkemeldung und Mitarbeiterverwaltung
 
-**Version:** v3.6.0 (26.03.2026)  
+**Version:** v3.7.0 (06.05.2026)  
 **Module:** Dashboard · Mitarbeiter · Dienstliches · Aufgaben Tag/Nacht · Dienstplan · Übergabe · Fahrzeuge · Code 19 · **Telefonnummern** · Backup · Einstellungen · Hilfe · Passagieranfragen · **Schulungen**
 
-### Neu in v3.6.0
+### Neu in v3.7.0
+- **Sonderaufgaben – Vorfeldmitarbeiter**: Neuer Abschnitt mit 3 Gruppen × 3 Slots; Dropdowns aus Dienstplan mit Schichttyp (T/T10/N/N10), Bulmorfahrer (B) und E-Mobby-Fahrer (EM)
+- **Vorfeldmitarbeiterliste Excel**: Querformat A4, schwarz-weiß, Namen mit Abkürzungen, Speicherort `Daten/vorfeldmit/`
+- **Druckdialog**: Individuelle Anzahl pro Dokument (Standard: Sonderaufgaben 2×, Vorfeld 3×); Druck via PowerShell COM-Automation (Excel.Application)
 - **Schulungen – Mitarbeiter-Liste** (neuer Tab neben Kalender): Suche nach Name, Filter nach Status & Schulungstyp; Matrix EH/Refresher/ZÜP/Ärztl./FS-K. mit Farbkodierung; Mitarbeiter ohne Einträge gesondert grau
 - **Schulungen – Detailansicht**: Doppelklick auf MA → alle 14 Schulungstypen; fehlende Einträge leer/grau
 - **Schulungen – Datum bearbeiten**: ✏️-Button oder Doppelklick je Schulungstyp → Datumspicker, automatische Gültig-bis-Berechnung, direktes Speichern in DB

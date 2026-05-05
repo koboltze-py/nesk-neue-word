@@ -5,109 +5,25 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
-## 20.04.2026 – v3.10.0
+## 06.05.2026 – v3.7.0
 
-### Vorkommnisse – Neues Sidebar-Modul für Vorfallberichte
+### Sonderaufgaben – Vorfeldmitarbeiter & verbesserter Druckdialog
 
-#### `gui/vorkommnisse.py` (neu)
-- **Vollständiges Vorkommnisbericht-Formular**: Flugnummer / Vorkommnis, Datum, Uhrzeit, Ort, Beteiligte Mitarbeiter, Kategorie, Beschreibung, Maßnahmen
-- **Label „Flugnummer / Vorkommnis:"** – universell für Flüge und flugunabhängige Ereignisse
-- **1. Betroffene Personen** (ehemals „Betroffene Passagiere"): generische `_EditTable` mit 4 Spalten
-  - Typ-Dropdown: `Passagier`, `PRM Passagier`, `Patient`, `Mitarbeiter`, `Sonstige`
-  - Kategorie (Spalte 2) nur aktiv wenn Typ = „PRM Passagier" (`conditional_columns`-Feature)
-  - PRM-Kategorien: `WCHS`, `WCHR`, `WCHC`, `BLND`, `DEAF`, `DPNA`, `UMNR`, `STCR`, `MEDA`, `Sonstiges`
-- **`_EditTable.conditional_columns`**: neuer Parameter `dict[int, tuple[int, list[str]]]` – deaktiviert und leert Spalte wenn Bedingungsspalte nicht den erwarteten Wert hat; `_update_conditional()` + Signal-Wiring in `_add_row()` und `set_data()`
-- **Offblock-Felder optional**: Plan- und Ist-Offblock als `QTimeEdit + QCheckBox("angeben")` in `QWidget`-Container; standardmäßig deaktiviert; Checkbox steuert Aktivierung des Zeitfelds; `_sammle_daten()` gibt `""` zurück wenn Checkbox inaktiv
-- **Verspätungs-Berechnung**: nur wenn beide Offblock-Checkboxen aktiv und Plan < Ist (sonst kein Eintrag)
-- **Word-Export (`_erstelle_word`)**: dynamische Grunddaten-Tabelle (Offblock-Zeilen nur wenn befüllt); Personen-Tabelle mit 4 Spalten `[Person, Typ, Kategorie, Anmerkung]`; DRK-Logo in Kopfzeile
-- **E-Mail-Entwurf (`_btn_email`)**: `_email_entwurf_dialog()` mit vorausgefülltem Betreff `Vorkommnisbericht – Flug {flug}`, QTextEdit-Body, QListWidget der `.docx`-Dateien (nach mtime sortiert); `_erstelle_outlook_entwurf()` via `win32com.client`
-- **Header-Buttons**: Neu, Speichern, Word-Export, Ordner öffnen, E-Mail-Entwurf
-- **`_formular_leeren()`**: Setzt Checkboxen auf False + QTime(0,0)
-- **`_formular_befuellen()`**: Checkbox wird gesetzt wenn Wert nicht in `("", "00:00", "00:00 Uhr")`
-
-#### `functions/vorkommnisse_db.py` (neu)
-- SQLite CRUD für `vorkommnisse.db` (WAL-Modus)
-- Tabelle `vorkommnisse`: id, datum, uhrzeit, ort, flugnummer, kategorie, beschreibung, massnahmen, offblock_plan, offblock_ist, verspaetung_min, personen (JSON), mitarbeiter, erstellt_am
-- `speichern(daten)`, `aktualisieren(id, daten)`, `lade_alle()`, `lade_einen(id)`, `loeschen(id)`
-
-#### `config.py`
-- `VORKOMMNISSE_DB_PATH` ergänzt (`database SQL/vorkommnisse.db`)
-- `NOTIZEN_DB_PATH` ergänzt (`database SQL/notizen.db`)
-
-### Dashboard – Notizen-Panel mit Kalenderintegration
-
-#### `gui/dashboard.py`
-- **Kalender-Dots**: blaue Punkte für Termine, grüne Punkte für Notizen; Doppelklick auf Tag öffnet Dialog
-- **`_neue_notiz_dialog()`**: Dialog zum Anlegen neuer Notizen mit Datum, Titel, Text, Fälligkeitsdatum
-- Kalender aktualisiert sich nach Speichern automatisch
-
-#### `functions/notizen_db.py` (neu)
-- SQLite CRUD für `notizen.db` (WAL-Modus)
-- Funktionen: `speichern`, `als_gelesen`, `als_erledigt`, `loeschen`, `lade_aktive`, `lade_alle`, `lade_fuer_datum`
-
----
-
-## 15.04.2026 – v3.9.0
-
-### Schulungen – Informiert-Status, neue Schulungstypen, Monatsfilter-Default
-
-#### `functions/schulungen_db.py`
-- **Informiert-Spalten**: `informiert` (BOOLEAN) und `informiert_am` (TEXT) in `schulungseintraege` per Migration ergänzt
-- **Vorfeldschulung** neu in `SCHULUNGSTYPEN_CFG`: `ablauf="direkt"`, Intervall 12 Monate, Warnungen bei 3/2/1 Monat
-- **Sicherheitsschulung** neu in `SCHULUNGSTYPEN_CFG`: `ablauf="intervall"`, 5 Jahre
-
-#### `gui/schulungen_kalender.py`
-- **`_SchulungBearbeitenDialog`**: Checkbox „Informiert" + Datumsfeld „informiert am" + 🗑-Button zum Löschen des Datums
-- **`_MitarbeiterDetailDialog`**: Spalte „Informiert" (Spalte 4) in der Schulungsübersicht
-- **`_MATRIX`**: Vorfeldschulung und Sicherheitsschulung ergänzt
-- **`_lade_typen()`**: Shortname `"Vorfeld"` für Vorfeldschulung
-
-#### `gui/dienstliches.py`
-- **Einsätze-Tab**: Monatsfilter wählt beim ersten Laden automatisch den aktuellen Monat/Jahr
-- **Patienten-Tab**: ebenso
-
-### Excel-Exporte – Datumssortierung
-
-#### `gui/bericht.py`, `gui/dienstliches.py`, `gui/mitarbeiter_dokumente.py`
-- **Datum-Spalten als echte Excel-Datumswerte**: statt Text-String wird `datetime.date`-Objekt in die Zelle geschrieben → Excel speichert als serielle Zahl → korrekte Sortierung nach vollem Datum
-- `number_format = "DD.MM.YYYY"` für deutschen Anzeigeformat
-- `_d()`-Helper in jeder Export-Funktion (DD.MM.YYYY → date-Objekt)
-- Betrifft: Verspätungen (`_verspaetungen_als_excel_speichern`), Einsätze (`export_einsaetze_excel`), Patienten (`export_patienten_excel`), Bericht (`_erstelle_bericht_excel`)
-
----
-
-## 02.04.2026 – v3.8.0
-
-### Sanitätsmaterial-Verbrauch – Excel-Export statt CSV
-
-#### `gui/sanmat/verbrauch.py`
-- **Export-Format geändert**: Button „CSV Export“ → „Excel Export“, Speicherdialog gibt `.xlsx` aus
-- **openpyxl-Export**: Strukturierte `.xlsx`-Datei mit Formatierung (kein CSV mehr)
-- **Aufbau der Ausgabe**:
-  - Titelzeile (dunkelgrau, weiße Schrift): „Sanitätsmaterial-Verbrauchsprotokoll – DRK Erste-Hilfe-Station FKB“
-  - Zeitraum-Zeile: Exportdatum + gefilterter Zeitraum
-  - Spalten-Header: Datum / Einsatz/Grund / Artikel / Menge / Entnehmer / Notiz
-  - Datums-Trennzeilen (blaugrau) mit allen Buchungen darunter, nach Einsatz gruppiert
-  - Gesamtübersicht am Ende: alle verbrauchten Artikel alphabetisch mit Menge + Einheit „Einsatz/Notiz“
-- Freeze ab Zeile 4, keine Gitternetzlinien
-- `import openpyxl`, `from openpyxl.styles import …`, `from collections import defaultdict` ergänzt
-
----
-
-## 31.03.2026 – v3.7.0
-
-### Dashboard – Stärkemeldung Word-Export komplett überarbeitet
-
-#### `functions/staerkemeldung_dashboard_export.py`
-- **Schrift durchgängig Aptos** (alle Runs: `r.font.name = "Aptos"`)
-- **Alle Texte schwarz** (`"000000"`) – kein weißer Text mehr
-- **Kein Hintergrund** – `BG_DUNKEL`-Hintergrund aus der linken Sidebar entfernt
-- **SCHICHTLEITER-Block aus der Sidebar entfernt** – kein separater Block mehr links
-- **Zeitraum-Zeile**: Label „Zeitraum:" fett, Datum-Wert nicht fett, tab-ausgerichtet (Tab-Stop 2550)
-- **Schichtleiter-Zeilen**: Uhrzeit als Tab-Label (fett), Name als Wert (nicht fett) – kein „Tag:" / „Nacht:"-Präfix
-- **Sidebar-Schriften +2pt** vergrößert (DRK-Name: 10,5 pt, Kreisverband: 9 pt, Station: 8 pt)
-- **PAX/Einsätze-Werte**: 13 pt (war 11 pt)
-- Batch-Test: 31/31 März-Exporte fehlerfrei (`_test_dashboard_maerz.py`)
+#### `gui/sonderaufgaben.py`
+- **Neuer Abschnitt „👷 Vorfeldmitarbeiter"** im Sonderaufgaben-Formular:
+  - 3 Gruppen (09:00–14:00, 14:00–19:00, 19:00–00:00), je 3 Mitarbeiter-Slots
+  - Dropdowns aus dem aktuellen Dienstplan befüllt (Tag + Nacht dedupliziert)
+  - Jeder Eintrag zeigt Schichttyp (T/T10/N/N10), Bulmorfahrer (B) und E-Mobby-Fahrer (EM) als Suffix
+- **Excel-Export Vorfeldmitarbeiterliste** (`Daten/vorfeldmit/`):
+  - Querformat A4, schwarz-weiß optimiert (kein Farbhintergrund)
+  - Spalten: Datum/Uhrzeit | Mitarbeiter 1 | Mitarbeiter 2 | Mitarbeiter 3
+  - Namen mit Schichttyp-Abkürzungen: `Müller [T10, B]`
+  - Fußzeile: Bearbeitung (Groß) / Version / Datum
+- **Druckdialog komplett überarbeitet**:
+  - Individuelle Anzahl pro Dokument: Sonderaufgaben `×` Spinner, Vorfeldmitarbeiterliste `×` Spinner
+  - Standardwerte: Sonderaufgaben = 2×, Vorfeldmitarbeiterliste = 3×
+  - Spinner deaktiviert wenn zugehörige Checkbox abgehakt
+  - Drucken via PowerShell COM-Automation (Excel.Application) – wartet auf Abschluss vor nächster Datei
 
 ---
 

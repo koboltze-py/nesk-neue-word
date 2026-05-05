@@ -5,6 +5,28 @@ Format: `[Datum] Beschreibung – betroffene Dateien`
 
 ---
 
+## 06.05.2026 – v3.7.0
+
+### Sonderaufgaben – Vorfeldmitarbeiter & verbesserter Druckdialog
+
+#### `gui/sonderaufgaben.py`
+- **Neuer Abschnitt „👷 Vorfeldmitarbeiter"** im Sonderaufgaben-Formular:
+  - 3 Gruppen (09:00–14:00, 14:00–19:00, 19:00–00:00), je 3 Mitarbeiter-Slots
+  - Dropdowns aus dem aktuellen Dienstplan befüllt (Tag + Nacht dedupliziert)
+  - Jeder Eintrag zeigt Schichttyp (T/T10/N/N10), Bulmorfahrer (B) und E-Mobby-Fahrer (EM) als Suffix
+- **Excel-Export Vorfeldmitarbeiterliste** (`Daten/vorfeldmit/`):
+  - Querformat A4, schwarz-weiß optimiert (kein Farbhintergrund)
+  - Spalten: Datum/Uhrzeit | Mitarbeiter 1 | Mitarbeiter 2 | Mitarbeiter 3
+  - Namen mit Schichttyp-Abkürzungen: `Müller [T10, B]`
+  - Fußzeile: Bearbeitung (Groß) / Version / Datum
+- **Druckdialog komplett überarbeitet**:
+  - Individuelle Anzahl pro Dokument: Sonderaufgaben `×` Spinner, Vorfeldmitarbeiterliste `×` Spinner
+  - Standardwerte: Sonderaufgaben = 2×, Vorfeldmitarbeiterliste = 3×
+  - Spinner deaktiviert wenn zugehörige Checkbox abgehakt
+  - Drucken via PowerShell COM-Automation (Excel.Application) – wartet auf Abschluss vor nächster Datei
+
+---
+
 ## 26.03.2026 – v3.6.0
 
 ### Schulungen-Modul – Mitarbeiter-Liste, Suche/Filter und Datum-Bearbeitung
